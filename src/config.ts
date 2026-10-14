@@ -15,6 +15,9 @@ export const config = {
 	showThinking(): boolean {
 		return get('showThinking', true);
 	},
+	efficientToolUse(): boolean {
+		return get('efficientToolUse', true);
+	},
 	/**
 	 * Forward tool-call ids on the Gemini wire. Claude needs them for the gateway's
 	 * Anthropic adapter; Gemini pairs calls to results by name and is left untouched.

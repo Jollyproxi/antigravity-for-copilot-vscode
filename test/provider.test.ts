@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { AntigravityProvider } from '../src/provider';
+import { log } from '../src/log';
 
 function sseResponse(payload: unknown): Response {
 	const stream = new ReadableStream<Uint8Array>({
@@ -23,7 +24,7 @@ describe('AntigravityProvider', () => {
 
 	afterEach(() => {
 		(vscode.workspace as any).getConfiguration = getConfiguration;
-		delete settings.toolCallIds;
+		for (const key of Object.keys(settings)) delete settings[key];
 	});
 
 	it('forwards completed gateway usage to VS Code after the SSE stream', async () => {
@@ -250,5 +251,289 @@ describe('AntigravityProvider', () => {
 		const all = await run('all');
 		expect(all.claude.id).toBe('call-1');
 		expect(all.gemini.id).toBe('call-1');
+	});
+});
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+	return { promise, resolve, reject };
+}
+
+class TestToken {
+	isCancellationRequested = false;
+	readonly listeners = new Set<() => void>();
+	onCancellationRequested = (listener: () => void) => {
+		if (this.isCancellationRequested) {
+			const timer = setTimeout(listener, 0);
+			return { dispose: () => clearTimeout(timer) };
+		}
+		this.listeners.add(listener);
+		return { dispose: () => this.listeners.delete(listener) };
+	};
+	cancel() {
+		this.isCancellationRequested = true;
+		for (const listener of [...this.listeners]) listener();
+	}
+}
+
+describe('provider effort, cancellation and latency diagnostics', () => {
+	const settings: Record<string, unknown> = {};
+	beforeEach(() => {
+		vi.spyOn(vscode.workspace, 'getConfiguration').mockImplementation(() => ({ get: (key: string) => settings[key] }) as any);
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+		for (const key of Object.keys(settings)) delete settings[key];
+	});
+
+	function harness(tiers = ['high', 'medium', 'low'], tools: vscode.LanguageModelChatTool[] = []) {
+		const client = {
+			postJson: vi.fn().mockResolvedValue({ models: Object.fromEntries(tiers.map(tier => [
+				`gemini-3.8-flash-${tier}`, { displayName: `Gemini 3.8 Flash (${tier})` },
+			])) }),
+			post: vi.fn().mockImplementation(async () => sseResponse({ response: {
+				candidates: [{ content: { parts: [{ text: 'done' }] } }],
+				usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, cachedContentTokenCount: 7 },
+			} })),
+		};
+		const projects = { resolve: vi.fn().mockResolvedValue('synthetic-project') };
+		const provider = new AntigravityProvider({ subscriptions: [] } as any,
+			{ onDidChange: () => ({ dispose() {} }), active: async () => ({ email: 'test@example.invalid' }) } as any,
+			{} as any, client as any, projects as any, { update() {} } as any);
+		const token = new TestToken();
+		const reports: any[] = [];
+		const fallback = { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash', maxOutputTokens: 65536 } as any;
+		const send = (info = fallback, effort = 'low', report = (part: any) => reports.push(part)) =>
+			provider.provideLanguageModelChatResponse(info,
+				[{ role: vscode.LanguageModelChatMessageRole.User, content: [new vscode.LanguageModelTextPart('PRIVATE_PROMPT')], name: undefined }],
+				{ tools, modelConfiguration: { reasoningEffort: effort } } as any, { report }, token);
+		return { provider, client, projects, token, reports, send,
+			discover: () => provider.provideLanguageModelChatInformation({ silent: true }, token) };
+	}
+
+	it.each([true, false].flatMap(showThinking => ['low', 'medium', 'high'].map(effort => ({ showThinking, effort }))))(
+		'aligns collapsed $effort payload with showThinking=$showThinking', async ({ showThinking, effort }) => {
+			settings.showThinking = showThinking;
+			const h = harness();
+			const [info] = await h.discover();
+			await h.send(info, effort);
+			const body = h.client.post.mock.calls[0][0].body;
+			expect(body.model).toBe(`gemini-3.8-flash-${effort}`);
+			expect(body.request.generationConfig.thinkingConfig).toEqual(showThinking ? { includeThoughts: true, thinkingLevel: effort } : undefined);
+			expect(body.request.generationConfig.maxOutputTokens).toBe(65536);
+		},
+	);
+
+	it('applies default guidance, supports opt-out on the next request, and logs actual call count', async () => {
+		const h = harness(undefined, [{ name: 'read/a', description: 'Read A' }, { name: 'read/b', description: 'Read B' }]);
+		const logs = vi.spyOn(log, 'info');
+		const [info] = await h.discover();
+		h.client.post.mockImplementation(async () => sseResponse({ response: { candidates: [{ content: { parts: [
+			{ functionCall: { name: 'read_a', args: { value: 'PRIVATE_A' } } },
+			{ functionCall: { name: 'read_b', args: { value: 'PRIVATE_B' } } },
+		] } }] } }));
+		await h.send(info, 'high');
+		const first = h.client.post.mock.calls[0][0].body.request;
+		expect(first.systemInstruction.parts).toHaveLength(1);
+		expect(h.reports).toHaveLength(2);
+		expect(logs.mock.calls.find(([, message]) => message === 'chat request')?.[2]).toMatchObject({ toolGuidance: 'efficient-v1', tools: 2, effort: 'high' });
+		expect(logs.mock.calls.find(([, message]) => message === 'chat complete')?.[2]).toMatchObject({ toolCalls: 2 });
+		settings.efficientToolUse = false;
+		await h.send(info, 'high');
+		const second = h.client.post.mock.calls[1][0].body.request;
+		expect(second.systemInstruction).toBeUndefined();
+		const { systemInstruction: _guidance, labels: _firstLabels, ...firstBody } = first;
+		const { labels: _secondLabels, ...secondBody } = second;
+		expect(firstBody).toEqual(secondBody);
+		expect(logs.mock.calls.filter(([, message]) => message === 'chat request')[1][2]).toMatchObject({ toolGuidance: 'off' });
+		expect(JSON.stringify(logs.mock.calls)).not.toContain('PRIVATE_');
+	});
+
+	it('shows and removes a new discovered product on refresh without an unavailable placeholder', async () => {
+		const h = harness();
+		expect((await h.discover()).some(m => m.name === 'Gemini 4 Argon')).toBe(false);
+		// Fixture-only gateway ID; no hardcoded Argon entry exists in production.
+		const id = 'gemini-argon-test-fixture';
+		h.client.postJson.mockResolvedValue({ models: {
+			'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+			[id]: { displayName: 'Gemini 4 Argon' },
+		} });
+		h.provider.refresh();
+		const refreshed = await h.discover();
+		expect(refreshed.filter(m => m.name === 'Gemini 4 Argon').map(m => m.id)).toEqual([id]);
+		h.client.postJson.mockResolvedValue({ models: {
+			'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+		} });
+		h.provider.refresh();
+		expect((await h.discover()).some(m => m.name === 'Gemini 4 Argon')).toBe(false);
+	});
+
+	it('filters the observed old Flash IDs from discovery by default, with all as explicit opt-in', async () => {
+		const h = harness();
+		h.client.postJson.mockResolvedValue({ models: {
+			'gemini-3-flash': { displayName: 'Gemini 3 Flash' },
+			'gemini-3-flash-agent': { displayName: 'Gemini 3.5 Flash (High)' },
+			'gemini-3.5-flash-low': { displayName: 'Gemini 3.5 Flash (Medium)' },
+			'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+			'gemini-3.8-flash-medium': { displayName: 'Gemini 3.8 Flash (Medium)' },
+			'gemini-3.8-flash-low': { displayName: 'Gemini 3.8 Flash (Low)' },
+			'claude-sonnet-4-6': { displayName: 'Claude Sonnet 4.6 (Thinking)' },
+			'claude-opus-4-6-thinking': { displayName: 'Claude Opus 4.6 (Thinking)' },
+			'gpt-oss-120b-medium': { displayName: 'GPT-OSS 120B (Medium)' },
+			'gemini-argon-test-fixture': { displayName: 'Gemini 4 Argon' },
+		} });
+		const models = await h.discover();
+		expect(models.map(m => m.name)).toEqual([
+			'Gemini 3.8 Flash', 'Claude Sonnet 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)',
+			'GPT-OSS 120B (Medium)', 'Gemini 4 Argon',
+		]);
+		expect(models[0].configurationSchema?.properties.reasoningEffort?.enum).toEqual(['low', 'medium', 'high']);
+		settings.effortSelection = 'tiers';
+		expect((await h.discover()).filter(m => m.family === 'gemini').map(m => m.id)).toEqual([
+			'gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low', 'gemini-argon-test-fixture',
+		]);
+		settings.modelSelection = 'all';
+		h.provider.refresh();
+		expect((await h.discover()).map(m => m.id)).toEqual(expect.arrayContaining(['gemini-3-flash', 'gemini-3-flash-agent', 'gemini-3.5-flash-low']));
+		settings.modelSelection = 'latest';
+		h.provider.refresh();
+		expect((await h.discover()).some(m => m.id === 'gemini-3-flash' || m.id === 'gemini-3-flash-agent')).toBe(false);
+	});
+
+	it('uses the actual fallback tier when Medium is unavailable', async () => {
+		const h = harness(['high', 'low']);
+		const [info] = await h.discover();
+		await h.send(info, 'medium');
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe('gemini-3.8-flash-high');
+		expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBe('high');
+	});
+
+	it('keeps an explicitly selected Low row aligned despite High in options', async () => {
+		settings.effortSelection = 'tiers';
+		const h = harness();
+		const info = (await h.discover()).find(model => model.id.endsWith('-low'))!;
+		await h.send(info, 'high');
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe('gemini-3.8-flash-low');
+		expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBe('low');
+	});
+
+	it('aligns Medium when requested Low is absent from the catalog', async () => {
+		const h = harness(['high', 'medium']);
+		const [info] = await h.discover();
+		await h.send(info, 'low');
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe('gemini-3.8-flash-medium');
+		expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBe('medium');
+	});
+
+	it('keeps the existing off-setting Low fallback consistent', async () => {
+		settings.reasoningEffort = 'off';
+		const h = harness();
+		const [info] = await h.discover();
+		await h.send(info, ''); // Invalid/empty picker selection falls back to the setting.
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe('gemini-3.8-flash-low');
+		expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBe('low');
+	});
+
+	it('preserves Claude numeric budgets and output limits', async () => {
+		const h = harness();
+		await h.send({ id: 'claude-sonnet-4-6', name: 'Claude', maxOutputTokens: 64000 } as any, 'medium');
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe('claude-sonnet-4-6');
+		expect(body.request.generationConfig).toMatchObject({ maxOutputTokens: 64000, thinkingConfig: { thinkingBudget: 16384, includeThoughts: true } });
+		expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBeUndefined();
+	});
+
+	it('skips project resolution and post for an already cancelled token', async () => {
+		const h = harness();
+		h.token.cancel();
+		await h.send();
+		expect(h.projects.resolve).not.toHaveBeenCalled();
+		expect(h.client.post).not.toHaveBeenCalled();
+		expect(h.reports).toEqual([]);
+		expect(h.token.listeners.size).toBe(0);
+	});
+
+	it.each(['resolve', 'reject'])('settles cancellation before project finishes, including late %s', async completion => {
+		const h = harness();
+		const project = deferred<string>();
+		h.projects.resolve.mockReturnValue(project.promise);
+		const run = h.send();
+		expect(h.projects.resolve).toHaveBeenCalledOnce();
+		h.token.cancel();
+		await run; // Must finish while the project promise is still pending.
+		expect(h.client.post).not.toHaveBeenCalled();
+		if (completion === 'resolve') project.resolve('late-project');
+		else project.reject(new Error('late failure'));
+		await Promise.resolve();
+		expect(h.client.post).not.toHaveBeenCalled();
+		expect(h.reports).toEqual([]);
+		expect(h.token.listeners.size).toBe(0);
+	});
+
+	it('cancels a pending SSE read and emits no finish note or usage after cancel', async () => {
+		const h = harness();
+		const firstReport = deferred<void>();
+		const cancelStream = vi.fn();
+		h.client.post.mockResolvedValue(new Response(new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":10}}}\n\n'));
+			},
+			cancel: cancelStream,
+		})));
+		const infoLog = vi.spyOn(log, 'info');
+		const run = h.send(undefined, 'low', part => { h.reports.push(part); firstReport.resolve(); });
+		await firstReport.promise;
+		h.token.cancel();
+		await run;
+		expect(cancelStream).toHaveBeenCalledOnce();
+		expect(h.reports).toHaveLength(1);
+		expect(h.client.post.mock.calls[0][0].signal.aborted).toBe(true);
+		expect(infoLog.mock.calls.some(([, message]) => message === 'chat complete')).toBe(false);
+		expect(infoLog.mock.calls.find(([, message]) => message === 'chat timing')?.[2]).toMatchObject({ outcome: 'cancelled' });
+	});
+
+	it.each([true, false])('records real content milestones without logging content (showThinking=%s)', async showThinking => {
+		settings.showThinking = showThinking;
+		const h = harness();
+		const infoLog = vi.spyOn(log, 'info');
+		const debugLog = vi.spyOn(log, 'debug');
+		h.client.post.mockResolvedValue(sseResponse({ response: {
+			candidates: [{ content: { parts: [
+				{ text: 'PRIVATE_THOUGHT', thought: true },
+				{ functionCall: { name: 'PRIVATE_TOOL', args: { value: 'PRIVATE_ARG' } } },
+				{ text: 'PRIVATE_ANSWER' },
+				{ text: 'PRIVATE_ANSWER_2' },
+			] } }], usageMetadata: { promptTokenCount: 10, cachedContentTokenCount: 7 },
+		} }));
+		await h.send();
+		const record = infoLog.mock.calls.find(([, message]) => message === 'chat timing')!;
+		const timing = record[2]!;
+		expect(timing).toMatchObject({ outcome: 'complete' });
+		const names = ['providerStart', 'translationDone', 'projectStart', 'projectEnd', 'firstSse', 'firstThought', 'firstTool', 'firstAnswer'];
+		let previous = -1;
+		for (const name of names) {
+			expect(timing[`${name}Ms`]).toBeGreaterThanOrEqual(previous);
+			previous = timing[`${name}Ms`] as number;
+			expect(debugLog.mock.calls.filter(([, message, data]) => message === 'chat phase' && data?.phase === name)).toHaveLength(1);
+		}
+		expect(timing.totalMs).toBeGreaterThanOrEqual(previous);
+		expect(infoLog.mock.calls.find(([, message]) => message === 'chat complete')?.[2]).toMatchObject({ cachedTokens: 7 });
+		for (const calls of [infoLog.mock.calls, debugLog.mock.calls]) expect(JSON.stringify(calls)).not.toContain('PRIVATE_');
+	});
+
+	it('reports preparation failures with timing and disposes cancellation listener', async () => {
+		const h = harness();
+		const infoLog = vi.spyOn(log, 'info');
+		h.projects.resolve.mockRejectedValue(new Error('project failed'));
+		await expect(h.send()).rejects.toThrow();
+		expect(h.token.listeners.size).toBe(0);
+		expect(infoLog.mock.calls.find(([, message]) => message === 'chat timing')?.[2]).toMatchObject({ outcome: 'failed' });
+		expect(h.client.post).not.toHaveBeenCalled();
 	});
 });

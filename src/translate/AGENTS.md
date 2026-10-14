@@ -10,6 +10,7 @@
 - `fromGemini.ts` converts streamed candidates into VS Code text, thinking, tool-call, and private usage parts while recording signatures and usage.
 - `schema.ts` normalizes tool schemas and maintains reversible tool-name mappings.
 - `thinking.ts` owns model-specific reasoning configuration and the bounded in-memory thought-signature cache.
+- `toolGuidance.ts` adds optional, stable Gemini tool-planning guidance without rewriting messages or filtering tools.
 - `types.ts` defines the minimal wire shapes and shared response-part MIME contract used by translation and API code.
 
 ## Local Contracts
@@ -21,6 +22,7 @@
 - Tool schemas pass two validators. Remove unsupported protobuf fields and recursive `x-*` vendor metadata (including `x-mcp-*`), keep lowercase JSON Schema types, retain property names verbatim, convert `const` to one-value `enum`, preserve dropped constraints as description hints, and fill empty object schemas for Claude.
 - Replay Gemini thought signatures across turns. VS Code history cannot store them, so cache by tool call id or stable assistant-text key.
 - Gemini reasoning effort comes from the tiered model id; only numeric-budget models receive `thinkingBudget`, which must stay strictly below `maxOutputTokens`.
+- Tool-use guidance is advisory and subordinate to the requested scope, host/project instructions, and required validation. Keep it configurable, scoped to Gemini chat requests with compatible tools, and independent of effort, tool mode, and history.
 - Prefer native `LanguageModelThinkingPart` when present at runtime and retain the text-blockquote fallback.
 - After native thinking, emit the empty `vscode_reasoning_done` thinking-part sentinel before answer text, tool calls, or stream completion so Agent mode closes the reasoning card; keep the blockquote separator for older hosts.
 - Report completed gateway usage as a `LanguageModelDataPart` with MIME type `usage` and OpenAI-shaped snake_case fields so VS Code's context-window widget can display real usage. Never replay that internal part to Gemini.

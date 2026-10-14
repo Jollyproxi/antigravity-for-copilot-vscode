@@ -10,20 +10,23 @@
 - `provider.ts` is the orchestration seam from model discovery and request translation through gateway streaming and VS Code response parts.
 - `config.ts` reads `antigravity.*` settings and identifies changes that require provider refresh.
 - `log.ts` owns structured operation logging and secret/error redaction.
+- `timing.ts` records generation phase milestones and terminal summaries using monotonic time and fixed phase names.
 - `agyCli.ts` runs the optional local `agy` sidecar for native web-search requests and parses its machine-readable stream.
 - `webSearch.ts` registers the `antigravity_web_search` VS Code tool marker and returns grounded search results to Copilot.
 - `agyImage.ts` runs the optional local `agy` sidecar for native image generation, validates bounded raster artifacts, and keeps artifact paths inside Antigravity's brain directories.
 - `imageGeneration.ts` registers the `antigravity_generate_image` VS Code tool marker and returns inline image data parts to Copilot.
+- `imageArtifacts.ts` persists validated returned raster bytes in extension storage, creates local preview references, and identifies the extension's own artifacts for final-answer display.
 
 ## Local Contracts
 
 - Register the provider under vendor id `antigravity`; keep command ids synchronized with `package.json`.
 - Route protocol-specific transformations through `translate/`, transport/discovery through `api/`, credentials through `auth/`, and user interaction through `ui/`.
 - Maintain cancellation across VS Code requests, fetch calls, retry delays, and stream consumption.
-- Keep optional `agy` sidecars bounded to one native tool call, pass arguments without a shell, reject unexpected tool steps, and never expose their stderr or credentials to chat.
+- Keep optional `agy` sidecars bounded: one native search call, or one built-in `image-generator` delegation (legacy direct `generate_image` supported). Pass arguments without a shell, reject unexpected parent tools/delegates, and never expose their stderr or credentials to chat.
 - For image generation, validate raster magic bytes and size limits, resolve artifact paths through `realpath`, and allow only Antigravity-owned brain directories.
-- When Agy omits `output_path`, recover only recent raster files under the stream's validated `conversation_id` directory; never scan the whole user home or another session.
-- Do not force the Agy terminal `--sandbox` flag from the extension; the CLI documents that sandbox as Linux/macOS-only, while the Windows path relies on the sidecar's one-tool prompt, post-step validation, and VS Code confirmation.
+- Preview copies may be written only from already validated image bytes into extension-owned storage. Never read an arbitrary model-supplied path to create a preview. Final-answer previews must match known generated references in the current turn; preserve tool output when preview storage fails.
+- When Agy omits `output_path`, recover only recent raster files under the stream's validated parent `conversation_id` or child ID explicitly linked to the verified `image-generator`; never scan the whole user home or unrelated sessions.
+- Do not force the Agy terminal `--sandbox` flag from the extension. Preserve the CLI's permission behavior, confine the requested image route, validate completed execution, and retain VS Code confirmation without adding auto-approval flags.
 - Never log prompts, reasoning text, tool arguments/results, access tokens, refresh tokens, or OAuth credentials.
 - Feature-detect VS Code runtime APIs that are newer than or absent from `@types/vscode`.
 

@@ -12,4 +12,5 @@ media/**
 test/**
 graphify-out/**
 docs/research/**
+tmp/**
 vitest.config.ts

@@ -11,6 +11,7 @@
 - `agent-metadata.ts` owns session identifiers, request metadata/envelopes, and client-compatible field ordering.
 - `models.ts` and `modelInfo.ts` own catalogue parsing, curation, effort tiers, quota buckets, and picker metadata.
 - `stream.ts` owns incremental SSE framing and JSON event parsing.
+- `cancellation.ts` stops a caller's wait on shared project/token work without aborting other consumers.
 - `credentials.example.ts` documents the required local OAuth credential module; `credentials.ts` is ignored and private.
 
 ## Local Contracts
@@ -21,7 +22,7 @@
 - Retry only the transient statuses encoded in the client and honor cancellation during requests and retry delays.
 - Preserve the real client's envelope field order, five-segment request id, telemetry labels, and FNV-1a session id.
 - Parse `fetchAvailableModels` as a map keyed by model id. Keep fallback models for discovery failure, not as a substitute for malformed successful data.
-- Default model curation is a rolling window of three Gemini generations per line, excluding Flash Lite and internal Tab/Chat/image/tiered aliases; `all` bypasses curation. Keep the fallback roster synchronized with CLI-visible current models.
+- Default model curation keeps only the newest discovered Gemini generation per line and all its effort tiers, excluding Flash Lite and internal Tab/Chat/image/tiered aliases. New product lines pass through discovery. `all` bypasses generation/Flash Lite filtering but still deduplicates and excludes non-chat aliases. Keep the fallback roster synchronized with CLI-visible current models; never add unavailable preview placeholders or guessed IDs.
 - Group all Gemini models together and keep Claude/GPT separate, matching the native client's usage display. When per-model fractions differ, retain the lowest reported fraction; never add or average quota percentages.
 - SSE parsing must tolerate arbitrary chunk boundaries, CRLF/LF separators, multi-line `data:` fields, `[DONE]`, and a final unterminated event.
 

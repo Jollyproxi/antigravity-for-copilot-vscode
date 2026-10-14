@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readSse } from '../src/api/stream';
 
 /** Builds a Response whose body emits exactly the given chunks, byte for byte. */
@@ -70,5 +70,28 @@ describe('readSse', () => {
 
 	it('rejects a response with no body', async () => {
 		await expect(collect(new Response(null))).rejects.toThrow(/empty stream/);
+	});
+
+	it('cancels an open stream before the first event and releases the reader lock', async () => {
+		const cancel = vi.fn();
+		const response = new Response(new ReadableStream({ cancel }));
+		const controller = new AbortController();
+		const events = readSse(response, 'test', controller.signal);
+		const next = events.next();
+		const rejected = expect(next).rejects.toMatchObject({ name: 'AbortError' });
+		controller.abort();
+		await rejected;
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(response.body!.locked).toBe(false);
+	});
+
+	it('does not yield remaining buffered events after cancellation', async () => {
+		const controller = new AbortController();
+		const response = responseOf(['data: {"n":1}\n\ndata: {"n":2}\n\n']);
+		const events = readSse(response, 'test', controller.signal);
+		expect((await events.next()).value).toEqual({ n: 1 });
+		controller.abort();
+		await expect(events.next()).rejects.toMatchObject({ name: 'AbortError' });
+		expect(response.body!.locked).toBe(false);
 	});
 });

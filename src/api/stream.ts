@@ -1,4 +1,5 @@
 import { log } from '../log';
+import { awaitWithSignal } from './cancellation';
 
 /**
  * Reads a `text/event-stream` body and yields each parsed `data:` payload.
@@ -7,7 +8,7 @@ import { log } from '../log';
  * carried across reads. Events are separated by a blank line; multi-line `data:` fields
  * are concatenated per the SSE spec.
  */
-export async function* readSse<T>(response: Response, op: string): AsyncGenerator<T> {
+export async function* readSse<T>(response: Response, op: string, signal?: AbortSignal): AsyncGenerator<T> {
 	const body = response.body;
 	if (!body) {
 		throw new Error('Antigravity returned an empty stream.');
@@ -17,17 +18,20 @@ export async function* readSse<T>(response: Response, op: string): AsyncGenerato
 	const decoder = new TextDecoder();
 	let buffer = '';
 	let events = 0;
+	let exhausted = false;
 
 	try {
 		while (true) {
-			const { done, value } = await reader.read();
+			const { done, value } = await awaitWithSignal(() => reader.read(), signal);
 			if (done) {
+				exhausted = true;
 				break;
 			}
 			buffer += decoder.decode(value, { stream: true });
 
 			let separator = findSeparator(buffer);
 			while (separator) {
+				signal?.throwIfAborted();
 				const raw = buffer.slice(0, separator.index);
 				buffer = buffer.slice(separator.index + separator.length);
 				const parsed = parseEvent<T>(raw, op);
@@ -40,6 +44,7 @@ export async function* readSse<T>(response: Response, op: string): AsyncGenerato
 		}
 
 		// A final event may arrive without a trailing blank line.
+		signal?.throwIfAborted();
 		const parsed = parseEvent<T>(buffer, op);
 		if (parsed !== undefined) {
 			events++;
@@ -47,6 +52,10 @@ export async function* readSse<T>(response: Response, op: string): AsyncGenerato
 		}
 	} finally {
 		log.debug(op, 'stream closed', { events });
+		if (!exhausted) {
+			// Do not wait for transport cleanup to finish a cancelled consumer.
+			void reader.cancel().catch(() => {});
+		}
 		reader.releaseLock();
 	}
 }

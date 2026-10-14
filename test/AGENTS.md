@@ -10,13 +10,16 @@
 - `constants.test.ts` covers the Antigravity CLI fingerprint used in gateway headers.
 - `modelinfo.test.ts` covers picker configuration schemas and effort-source resolution.
 - `provider.test.ts` covers the provider response seam, including SSE consumption, usage-part forwarding, and unique synthesized tool-call ids.
+- Provider regressions also cover resolved effort payloads, preparation/stream cancellation, and content-free phase timings; `client.test.ts` covers token waits, shared refresh, retries, request summaries, and transport timing.
 - `models.test.ts` covers discovery parsing, curation, tier collapsing/resolution, quota groups, and fallback models.
 - `statusBar.test.ts` covers grouped quota labels and missing/exhausted quota using a mocked status bar.
 - `schema.test.ts` covers schema normalization and tool-name sanitization/mapping.
 - `stream.test.ts` covers SSE framing and parsing.
 - `translate.test.ts` covers outgoing/incoming translation, tool calls/results, images, signatures, thinking, usage reporting, and finish behavior, including tool-call id emission and its omission when disabled.
+- Tool-guidance regressions cover opt-out, family/tool scoping, preservation of input/history and generation settings, and multiple tool calls with signature replay. Provider tests verify setting propagation and guidance/call-count diagnostics.
 - `agyCli.test.ts` covers native search prompt construction and stream-result validation without starting the CLI.
-- `agyImage.test.ts` covers native image prompt construction, stream artifact extraction, session artifact recovery, raster validation, and unexpected-tool rejection without starting the CLI.
+- `agyImage.test.ts` covers native image prompt construction, legacy and image-generator stream evidence, delegated identity/session validation, scoped artifact recovery, raster validation, and failure classification without starting the CLI.
+- `imageArtifacts.test.ts` covers persisted preview bytes/URLs, redirected-directory rejection, tool-result reference preservation, and current-turn final-answer previews including duplicates, cancellation, and failures.
 - `vscode-stub.ts` supplies the runtime classes/enums required by Vitest; `vitest.config.ts` aliases `vscode` to it.
 
 ## Local Contracts

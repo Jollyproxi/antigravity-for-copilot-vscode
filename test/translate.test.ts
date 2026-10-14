@@ -6,6 +6,7 @@ import { closeThinkingPart, createUsageDataPart, emitChunk, newEmitState } from 
 import { SignatureCache } from '../src/translate/thinking';
 import { ToolNameMap } from '../src/translate/schema';
 import { GenerateContentResponse } from '../src/translate/types';
+import { applyToolGuidance } from '../src/translate/toolGuidance';
 
 const GEMINI: ModelSpec = {
 	id: 'gemini-3.1-pro-high',
@@ -156,6 +157,86 @@ describe('buildRequest — tool round trip', () => {
 		const { request } = build([userMessage(new vscode.LanguageModelTextPart('go'))]);
 		expect(request.tools).toBeUndefined();
 		expect(request.toolConfig).toBeUndefined();
+	});
+});
+
+describe('buildRequest — efficient tool guidance', () => {
+	const tools = [{ name: 'read/a', description: 'Read A' }, { name: 'read/b', description: 'Read B' }];
+	const messages = [userMessage(new vscode.LanguageModelTextPart('Follow project instructions; investigate the specified file.'))];
+
+	it.each([vscode.LanguageModelChatToolMode.Auto, vscode.LanguageModelChatToolMode.Required])(
+		'only adds a system instruction, preserving messages/tools/generation and mode %s', mode => {
+			const options = buildOptions({ messages, tools, toolMode: mode, model: { ...GEMINI, thinkingTier: 'high' }, reasoningEffort: 'high', includeThoughts: true });
+			const before = JSON.stringify({ messages, tools });
+			const baseline = buildRequest({ ...options, efficientToolUse: false });
+			const guided = buildRequest({ ...options, efficientToolUse: true });
+			expect(guided.toolGuidance).toBe('efficient-v1');
+			expect(guided.request.systemInstruction?.parts).toHaveLength(1);
+			expect(guided.request.systemInstruction?.parts[0].text?.length).toBeGreaterThan(0);
+			const { systemInstruction: _guidance, ...rest } = guided.request;
+			expect(rest).toEqual(baseline.request);
+			expect(guided.request.toolConfig?.functionCallingConfig.mode).toBe(mode === vscode.LanguageModelChatToolMode.Required ? 'ANY' : 'AUTO');
+			expect(JSON.stringify({ messages, tools })).toBe(before);
+			expect(buildRequest({ ...options, efficientToolUse: true }).request).toEqual(guided.request);
+			expect(buildRequest(options).request).toEqual(baseline.request);
+		},
+	);
+
+	it('preserves existing system parts and adds the guidance only once', () => {
+		const request = buildRequest(buildOptions({ messages, tools })).request;
+		const hostInstruction = { parts: [{ text: 'Host: obey required repository validation.' }] };
+		request.systemInstruction = hostInstruction;
+		expect(applyToolGuidance(request, GEMINI, true)).toBe(true);
+		expect(applyToolGuidance(request, GEMINI, true)).toBe(true);
+		expect(request.systemInstruction.parts).toHaveLength(2);
+		expect(request.systemInstruction.parts[0]).toEqual(hostInstruction.parts[0]);
+		expect(hostInstruction.parts).toHaveLength(1);
+	});
+
+	it.each([CLAUDE, { ...GEMINI, family: 'gpt-oss', thinkingStyle: 'none' }, { ...GEMINI, id: 'gemini-3.1-flash-image', thinkingStyle: 'none' }] as ModelSpec[])(
+		'keeps the existing request for non-target model $id', model => {
+			const options = buildOptions({ messages, tools, model });
+			const guided = buildRequest({ ...options, efficientToolUse: true });
+			expect(guided.toolGuidance).toBe('off');
+			expect(guided.request).toEqual(buildRequest(options).request);
+		},
+	);
+
+	it.each([undefined, [], [{ name: 'codexForCopilot_searchWeb', description: 'Incompatible hosted marker' }]])(
+		'omits guidance when no compatible tool declarations remain (%j)', offered => {
+			const result = buildRequest(buildOptions({ messages, tools: offered, efficientToolUse: true }));
+			expect(result.request.systemInstruction).toBeUndefined();
+			expect(result.toolGuidance).toBe('off');
+		},
+	);
+
+	it('round-trips multiple calls with unique ids, matching results, and thought signatures', () => {
+		const signatures = new SignatureCache();
+		const outgoing = buildRequest(buildOptions({ messages, tools, signatures, efficientToolUse: true }));
+		const parts: any[] = [];
+		const state = newEmitState();
+		emitChunk({ response: { candidates: [{ content: { role: 'model', parts: [
+			{ functionCall: { name: 'read_a', args: { path: 'a.ts' } }, thoughtSignature: 'sig-a' },
+			{ functionCall: { name: 'read_b', args: { path: 'b.ts' } }, thoughtSignature: 'sig-b' },
+		] } }] } }, { names: outgoing.names, signatures, showThinking: true, progress: { report: part => parts.push(part) } }, state);
+		expect(parts).toHaveLength(2);
+		expect(parts[0].callId).not.toBe(parts[1].callId);
+		expect(parts.map(p => p.name)).toEqual(['read/a', 'read/b']);
+		expect(state.toolCallIndex).toBe(2);
+		const history = [...messages, assistantMessage(...parts), userMessage(
+			new vscode.LanguageModelToolResultPart(parts[1].callId, [new vscode.LanguageModelTextPart('B result')]),
+			new vscode.LanguageModelToolResultPart(parts[0].callId, [new vscode.LanguageModelTextPart('A result')]),
+		)];
+		const replay = buildRequest(buildOptions({ messages: history, tools, signatures, efficientToolUse: true })).request;
+		expect(replay.contents[1].parts).toEqual([
+			{ functionCall: { name: 'read_a', args: { path: 'a.ts' } }, thoughtSignature: 'sig-a' },
+			{ functionCall: { name: 'read_b', args: { path: 'b.ts' } }, thoughtSignature: 'sig-b' },
+		]);
+		expect(replay.contents[2].parts.map(p => p.functionResponse)).toEqual([
+			{ name: 'read_b', response: { output: 'B result' } },
+			{ name: 'read_a', response: { output: 'A result' } },
+		]);
+		expect(replay.systemInstruction).toEqual(outgoing.request.systemInstruction);
 	});
 });
 

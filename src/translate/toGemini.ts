@@ -3,6 +3,7 @@ import { ModelSpec } from '../api/models';
 import { emptySchema, sanitizeSchema, ToolNameMap } from './schema';
 import { applyThinking, ReasoningEffort, SignatureCache, textKey } from './thinking';
 import { GeminiContent, GeminiGenerationConfig, GeminiPart, GeminiRequest, GeminiTool, USAGE_DATA_PART_MIME } from './types';
+import { applyToolGuidance, TOOL_GUIDANCE_REVISION } from './toolGuidance';
 
 /** Hosted markers owned by another provider must not be sent to Antigravity as functions. */
 const INCOMPATIBLE_HOSTED_TOOL_NAMES = new Set(['codexForCopilot_searchWeb']);
@@ -16,6 +17,8 @@ export interface BuildOptions {
 	reasoningEffort: ReasoningEffort;
 	/** Ask the model to return its reasoning. Off by default. */
 	includeThoughts?: boolean;
+	/** Advisory Gemini tool planning; opt-in at this boundary, configured by the provider. */
+	efficientToolUse?: boolean;
 	/**
 	 * Forward the VS Code tool-call id on the wire. Gemini pairs calls to results by
 	 * name, but the gateway's Gemini→Anthropic adapter needs a non-empty `tool_use.id`
@@ -28,6 +31,7 @@ export interface BuildOptions {
 export interface BuildResult {
 	request: GeminiRequest;
 	names: ToolNameMap;
+	toolGuidance: typeof TOOL_GUIDANCE_REVISION | 'off';
 }
 
 export function buildRequest(options: BuildOptions): BuildResult {
@@ -56,7 +60,9 @@ export function buildRequest(options: BuildOptions): BuildResult {
 		request.generationConfig = generationConfig;
 	}
 
-	return { request, names };
+	const toolGuidance = applyToolGuidance(request, options.model, options.efficientToolUse === true)
+		? TOOL_GUIDANCE_REVISION : 'off';
+	return { request, names, toolGuidance };
 }
 
 /**

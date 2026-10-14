@@ -1,11 +1,40 @@
 # Antigravity capability audit
 
-Snapshot taken **2026-09-04 (Asia/Jakarta)**. This is a read-only comparison of
+Original capability snapshot taken **2026-09-04 (Asia/Jakarta)**. Except for the
+dated model update below, CLI versions, tool inventories, commands, and runtime
+observations in this audit are historical evidence, not the current model roster.
+The original audit is a read-only comparison of
 the installed Antigravity CLI (`agy`) with the public Antigravity SDK and the
 current VS Code provider boundary. It is intended to answer whether this
 extension can reproduce the native Antigravity/Gaussian-style search and tool
 experience. No access tokens, cookies, account identifiers, request bodies, or
 credential values are included.
+
+## Model catalogue update — 2026-10-14
+
+A fresh `agy models` query returned Gemini 3.8 Flash High/Medium/Low, Claude Sonnet
+4.6 (Thinking), Claude Opus 4.6 (Thinking), and GPT-OSS 120B (Medium). Older Flash
+generations and Gemini 3.1 Pro from the original snapshot are no longer in this
+account's returned list. The bridge's fallback roster now matches these six IDs.
+
+User-facing descriptions use Claude **4.6/5.5** to acknowledge changing availability;
+this does not create or rename discovered IDs. Gemini 4 Argon is advertised as
+Ultra-only in the user's native picker but was absent from this account's `agy models`
+result. The bridge creates no unavailable placeholder. A newly discovered Argon chat
+entry can appear on refresh using the gateway's ID; live Argon generation is unverified.
+
+The original audit also predates response-level reasoning observations: Gemini Flash
+can return thought text on some requests, not only token counts. Consult the README
+for the current provider behavior and settings.
+
+## Image-generation update — 2026-10-14
+
+CLI 1.2.16 moved image creation to the built-in `image-generator` subagent. Agy 1.3.5
+on this machine confirmed that the old direct-tool-only prompt blocked that route.
+Version 0.15.11 supports a verified image-generator invocation and its explicitly linked
+artifact session, while retaining direct generate_image support for older CLI versions.
+The original single-direct-tool description below records the earlier implementation.
+See the [official CLI changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md#1216).
 
 ## Executive conclusion
 

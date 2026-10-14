@@ -12,10 +12,9 @@ const BUDGETS: Record<Exclude<ReasoningEffort, 'off'>, number> = {
 /**
  * Builds `thinkingConfig` for the models that take one.
  *
- * Gemini 3 is deliberately excluded: it selects its thinking level from the tier
- * suffix already baked into the model id (`gemini-3.1-pro-high`), and takes a
- * `thinkingLevel` string rather than a numeric budget. Sending a budget to it is at
- * best ignored and at worst a 400.
+ * Tiered Gemini chat models use the resolved model id and, when requesting
+ * thoughts, a matching `thinkingLevel` string. Only numeric-budget models receive
+ * `thinkingBudget`.
  *
  * For the models that do take a budget, the gateway's one hard rule applies:
  * `maxOutputTokens` must be strictly greater than `thinkingBudget`.
@@ -27,9 +26,8 @@ export function applyThinking(
 	includeThoughts: boolean,
 ): GeminiGenerationConfig {
 	if (model.thinkingStyle === 'model-id-tier') {
-		// The tier in the model id already selects the effort, so the only reason to
-		// send a config at all is to ask for the thoughts back. Staying off this path
-		// by default keeps the known-good request shape untouched.
+		// Request thoughts according to showThinking (on by default in the provider).
+		// Hiding them omits this config but does not disable the model's reasoning.
 		if (!includeThoughts) {
 			return config;
 		}

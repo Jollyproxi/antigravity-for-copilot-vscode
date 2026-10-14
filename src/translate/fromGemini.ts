@@ -35,6 +35,8 @@ export function supportsThinkingPart(): boolean {
 }
 
 export interface EmitContext {
+	/** Content kind only: no prompt, thought text or tool data enters timing logs. */
+	onPart?: (kind: 'thought' | 'answer' | 'tool') => void;
 	names: ToolNameMap;
 	signatures: SignatureCache;
 	/** Surfaces the model's reasoning as chat text instead of discarding it. */
@@ -185,6 +187,7 @@ function emitPart(part: GeminiPart, context: EmitContext, state: EmitState): voi
 			context.signatures.set(callId, part.thoughtSignature);
 		}
 
+		context.onPart?.('tool');
 		context.progress.report(
 			new vscode.LanguageModelToolCallPart(callId, name, part.functionCall.args ?? {}),
 		);
@@ -197,6 +200,7 @@ function emitPart(part: GeminiPart, context: EmitContext, state: EmitState): voi
 
 	if (part.thought) {
 		state.thoughtParts++;
+		context.onPart?.('thought');
 		if (!context.showThinking) {
 			return;
 		}
@@ -231,6 +235,7 @@ function emitPart(part: GeminiPart, context: EmitContext, state: EmitState): voi
 		state.textBuffer += part.text;
 	}
 
+	context.onPart?.('answer');
 	context.progress.report(new vscode.LanguageModelTextPart(part.text));
 }
 

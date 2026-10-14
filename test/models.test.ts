@@ -5,9 +5,27 @@ import {
 	curateModels,
 	collapseTiers,
 	resolveTier,
+	resolveTierSpec,
 	FALLBACK_MODELS,
 } from '../src/api/models';
 import { DISCOVERY_ENDPOINTS, ENDPOINT_DAILY, ENDPOINT_PROD } from '../src/api/constants';
+
+describe('resolved translation spec', () => {
+	it('preserves discovered limits/capabilities and leaves the picker representative untouched', () => {
+		const representative = {
+			...spec('gemini-3.8-flash-high', 'Gemini 3.8 Flash'),
+			contextWindow: 12000, maxOutputTokens: 2048, supportsImages: false,
+			tierVariants: { low: 'gemini-3.8-flash-low', high: 'gemini-3.8-flash-high' },
+		};
+		const resolved = resolveTierSpec(representative, 'low');
+		expect(resolved).toMatchObject({
+			id: 'gemini-3.8-flash-low', thinkingTier: 'low', thinkingStyle: 'model-id-tier',
+			contextWindow: 12000, maxOutputTokens: 2048, supportsImages: false,
+		});
+		expect(representative.id).toBe('gemini-3.8-flash-high');
+		expect(representative.thinkingTier).toBe('high');
+	});
+});
 
 /** Stands in for GatewayClient, returning whatever the gateway is pretending to send. */
 function clientReturning(payload: unknown) {
@@ -187,7 +205,7 @@ describe('spec', () => {
 	});
 });
 
-/** The roster actually observed in the model picker, warts and all. */
+/** Historical multi-generation picker fixture; not the current account roster. */
 const OBSERVED: Array<[string, string]> = [
 	['chat-20706', 'Chat_20706'],
 	['chat-23310', 'Chat_23310'],
@@ -230,12 +248,10 @@ describe('curateModels', () => {
 		expect(names.some((n) => /Image/.test(n))).toBe(false);
 	});
 
-	it('keeps every Gemini 3 Flash generation, as Antigravity lists them', () => {
-		// 3.5, 3.6 and 3.7 Flash are three separate choices in Antigravity's own model
-		// list, not a ladder where the newest supersedes the rest.
+	it('keeps only the newest discovered Flash generation in the historical fixture', () => {
 		expect(names).toContain('Gemini 3.7 Flash (High)');
-		expect(names).toContain('Gemini 3.6 Flash (High)');
-		expect(names).toContain('Gemini 3.5 Flash (High)');
+		expect(names).not.toContain('Gemini 3.6 Flash (High)');
+		expect(names).not.toContain('Gemini 3.5 Flash (High)');
 	});
 
 	it('drops Gemini older than 3, which Antigravity does not list', () => {
@@ -257,19 +273,13 @@ describe('curateModels', () => {
 		expect(names.some((n) => /Flash Lite/i.test(n))).toBe(false);
 	});
 
-	it('offers exactly what the Antigravity model list does', () => {
+	it('curates the historical multi-generation roster consistently', () => {
 		expect([...names].sort()).toEqual([
 			'Claude Opus 4.6 (Thinking)',
 			'Claude Sonnet 4.6 (Thinking)',
 			'GPT-OSS 120B (Medium)',
 			'Gemini 3.1 Pro (High)',
 			'Gemini 3.1 Pro (Low)',
-			'Gemini 3.5 Flash (High)',
-			'Gemini 3.5 Flash (Low)',
-			'Gemini 3.5 Flash (Medium)',
-			'Gemini 3.6 Flash (High)',
-			'Gemini 3.6 Flash (Low)',
-			'Gemini 3.6 Flash (Medium)',
 			'Gemini 3.7 Flash (High)',
 			'Gemini 3.7 Flash (Low)',
 			'Gemini 3.7 Flash (Medium)',
@@ -299,6 +309,50 @@ describe('curateModels', () => {
 		const all = curateModels(raw, true).map((m) => m.name);
 		expect(all).toContain('Gemini 2.5 Pro');
 		expect(all.some((n) => /^Tab_|^Chat_|Tiered/.test(n))).toBe(false);
+	});
+});
+
+describe('current and newly discovered roster', () => {
+	it('keeps only the CLI-verified current IDs in the failure fallback', async () => {
+		const catalog = await fetchCatalog(clientThrowing(new Error('offline')), 'op', 'project');
+		expect(catalog.models.map(m => m.id)).toEqual([
+			'gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low',
+			'claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium',
+		]);
+		expect(collapseTiers(curateModels(catalog.models, false)).map(m => m.name)).toEqual([
+			'Gemini 3.8 Flash', 'Claude Sonnet 4.6 (Thinking)',
+			'Claude Opus 4.6 (Thinking)', 'GPT-OSS 120B (Medium)',
+		]);
+	});
+
+	it('does not supplement a successful catalogue with fallback or advertised previews', async () => {
+		const catalog = await fetchCatalog(clientReturning({ models: {
+			'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+		} }), 'op', 'project');
+		expect(catalog.isFallback).toBe(false);
+		expect(catalog.models.map(m => m.id)).toEqual(['gemini-3.8-flash-high']);
+	});
+
+	it('passes a newly discovered Gemini product line through without inventing its ID or effort tiers', async () => {
+		// Fixture-only ID: the real Argon wire ID/access has not been observed.
+		const id = 'gemini-argon-test-fixture';
+		const catalog = await fetchCatalog(clientReturning({ models: {
+			[id]: { displayName: 'Gemini 4 Argon' },
+		} }), 'op', 'project');
+		const models = collapseTiers(curateModels(catalog.models, false));
+		expect(models).toHaveLength(1);
+		expect(models[0]).toMatchObject({ id, name: 'Gemini 4 Argon', family: 'gemini' });
+		expect(models[0].tierVariants).toBeUndefined();
+		expect(models[0].thinkingTier).toBeUndefined();
+	});
+
+	it('preserves discovered Claude 5.5 names and IDs without substituting fallback 4.6', async () => {
+		// Fixture proves passthrough; it does not assert current account availability.
+		const id = 'claude-5-5-test-fixture';
+		const catalog = await fetchCatalog(clientReturning({ models: {
+			[id]: { displayName: 'Claude Sonnet 5.5 (Thinking)' },
+		} }), 'op', 'project');
+		expect(curateModels(catalog.models, false).map(m => [m.id, m.name])).toEqual([[id, 'Claude Sonnet 5.5 (Thinking)']]);
 	});
 });
 
@@ -388,11 +442,10 @@ describe('spec — output limits', () => {
 });
 
 /**
- * Antigravity's published list is a rolling window, not a fixed set: it showed
- * 3.5/3.6/3.7 Flash, then 3.6/3.7/3.8 once 3.8 shipped. Both states are pinned here so
- * the rule keeps tracking the list on its own.
+ * Legacy catalogues included several Flash generations. Retain regression coverage
+ * for the bridge's compatibility window without claiming this is today's native list.
  */
-describe('curateModels — rolling generation window', () => {
+describe('curateModels — newest discovered generation', () => {
 	const flash = (v: string) =>
 		(['high', 'medium', 'low'] as const).map((t) => spec(`gemini-${v}-flash-${t}`, `Gemini ${v} Flash (${t[0].toUpperCase()}${t.slice(1)})`));
 	const base = [
@@ -408,40 +461,37 @@ describe('curateModels — rolling generation window', () => {
 	const lines = (models: ReturnType<typeof spec>[]) =>
 		[...new Set(curateModels(models, false).map((m) => m.name.replace(/\s*\(.*\)$/, '')))].sort();
 
-	it('matched the list before 3.8 shipped', () => {
+	it('keeps 3.7 as the newest when 3.8 is absent', () => {
 		const out = lines([...base, ...flash('3.5'), ...flash('3.6'), ...flash('3.7')]);
 		expect(out).toEqual([
 			'Claude Opus 4.6',
 			'Claude Sonnet 4.6',
 			'GPT-OSS 120B',
 			'Gemini 3.1 Pro',
-			'Gemini 3.5 Flash',
-			'Gemini 3.6 Flash',
 			'Gemini 3.7 Flash',
 		]);
 	});
 
-	it('matches the list now that 3.8 shipped, retiring 3.5 on its own', () => {
+	it('retires all earlier Flash generations when discovery includes 3.8', () => {
 		const out = lines([...base, ...flash('3.5'), ...flash('3.6'), ...flash('3.7'), ...flash('3.8')]);
 		expect(out).toEqual([
 			'Claude Opus 4.6',
 			'Claude Sonnet 4.6',
 			'GPT-OSS 120B',
 			'Gemini 3.1 Pro',
-			'Gemini 3.6 Flash',
-			'Gemini 3.7 Flash',
 			'Gemini 3.8 Flash',
 		]);
 	});
 
-	it('will retire 3.6 when a 3.9 arrives, with no code change', () => {
+	it('will retire 3.8 when a 3.9 arrives, with no code change', () => {
 		const out = lines([...base, ...flash('3.6'), ...flash('3.7'), ...flash('3.8'), ...flash('3.9')]);
 		expect(out).toContain('Gemini 3.9 Flash');
 		expect(out).not.toContain('Gemini 3.6 Flash');
+		expect(out).not.toContain('Gemini 3.7 Flash');
+		expect(out).not.toContain('Gemini 3.8 Flash');
 	});
 
-	it('keeps a line with fewer than three generations intact', () => {
-		// Pro only ever had 3.1; a window must not require three to keep any.
+	it('keeps the newest Pro independently of Flash', () => {
 		expect(lines(base)).toContain('Gemini 3.1 Pro');
 	});
 });

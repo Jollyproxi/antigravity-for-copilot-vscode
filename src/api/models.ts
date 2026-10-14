@@ -15,8 +15,8 @@ export interface ModelSpec {
 	maxOutputTokens: number;
 	supportsImages: boolean;
 	/**
-	 * Gemini 3 takes its thinking level from the tier suffix in the model id
-	 * (`-low`, `-high`, …), so no thinkingConfig is sent. Claude takes a numeric budget.
+	 * Gemini chat models select effort from the model id. When thoughts are requested,
+	 * thinkingConfig repeats the resolved tier. Claude takes a numeric budget.
 	 */
 	thinkingStyle: 'none' | 'model-id-tier' | 'numeric-budget';
 	/** Effort tier parsed out of the model id, for models that encode it there. */
@@ -75,28 +75,14 @@ interface FetchAvailableModelEntry {
 }
 
 /**
- * The live Antigravity roster, as wire ids.
- *
- * Two of these look wrong and are not: the top Gemini tiers are addressed as
- * `gemini-pro-agent` and `gemini-3-flash-agent` rather than a `-high` suffix, and
- * Gemini 3.5's three tiers are `-high` / `-low` / `-extra-low` where `-low` is
- * actually the middle one. Renaming them to look tidy would 404.
+ * Conservative fallback snapshot verified with `agy models` on 2026-10-14.
+ * Used only when discovery fails or returns an empty model map, never merged into
+ * a successful catalogue. Do not add plan-gated previews or guessed model ids.
  */
 export const FALLBACK_MODELS: ModelSpec[] = [
 	spec('gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'),
 	spec('gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)'),
 	spec('gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)'),
-	spec('gemini-3.7-flash-high', 'Gemini 3.7 Flash (High)'),
-	spec('gemini-3.7-flash-medium', 'Gemini 3.7 Flash (Medium)'),
-	spec('gemini-3.7-flash-low', 'Gemini 3.7 Flash (Low)'),
-	spec('gemini-3.6-flash-high', 'Gemini 3.6 Flash (High)'),
-	spec('gemini-3.6-flash-medium', 'Gemini 3.6 Flash (Medium)'),
-	spec('gemini-3.6-flash-low', 'Gemini 3.6 Flash (Low)'),
-	spec('gemini-3-flash-agent', 'Gemini 3.5 Flash (High)'),
-	spec('gemini-3.5-flash-low', 'Gemini 3.5 Flash (Medium)'),
-	spec('gemini-3.5-flash-extra-low', 'Gemini 3.5 Flash (Low)'),
-	spec('gemini-pro-agent', 'Gemini 3.1 Pro (High)'),
-	spec('gemini-3.1-pro-low', 'Gemini 3.1 Pro (Low)'),
 	spec('claude-sonnet-4-6', 'Claude Sonnet 4.6 (Thinking)'),
 	spec('claude-opus-4-6-thinking', 'Claude Opus 4.6 (Thinking)'),
 	spec('gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)'),
@@ -153,11 +139,11 @@ export async function fetchCatalog(client: GatewayClient, op: string, project: s
  */
 const NON_CHAT = /^tab[_-]|^chat[_-]?\d+$|tiered|image/i;
 
-/** Antigravity lists no Gemini older than 3, so neither do we. */
+/** Compatibility filter for older catalogues; not a promise about today's native list. */
 const MIN_GEMINI_GENERATION = 3;
 
-/** How many generations of a line Antigravity keeps on offer at once. */
-const GENERATION_WINDOW = 3;
+/** Maximum discovered generations per product line in the bridge's curated view. */
+const GENERATION_WINDOW = 1;
 
 interface GeminiLine {
 	line: string;
@@ -219,12 +205,9 @@ export function curateModels(models: ModelSpec[], keepAllGenerations: boolean): 
 		return deduped;
 	}
 
-	// Match Antigravity's published model list without hardcoding it, because that list
-	// moves: it showed 3.5/3.6/3.7 Flash, then 3.6/3.7/3.8 when 3.8 landed. The shape
-	// that held across both is a rolling window — the newest few generations of each
-	// line, with the oldest retiring as a new one arrives. Encoding the window rather
-	// than the members means a new generation appears and an obsolete one leaves on
-	// their own.
+	// Limit older multi-generation catalogues without manufacturing missing models.
+	// A successful current catalogue can contain just one Flash generation. Unknown
+	// Gemini product lines pass through so newly discovered chat models can appear.
 	const eligible = deduped.filter((model) => {
 		const parsed = parseGeminiLine(model.id, model.name);
 		// Claude and GPT-OSS have no generation ladder and are always offered.
@@ -235,7 +218,7 @@ export function curateModels(models: ModelSpec[], keepAllGenerations: boolean): 
 		return parsed.line !== 'flash-lite' && parsed.version >= MIN_GEMINI_GENERATION;
 	});
 
-	// Per line, keep only the newest few versions.
+	// Per line, keep only the newest discovered version and all of its effort tiers.
 	const kept = new Map<string, Set<number>>();
 	for (const model of eligible) {
 		const parsed = parseGeminiLine(model.id, model.name);
@@ -268,8 +251,8 @@ function baseName(name: string): string {
  * Antigravity addresses each effort tier as its own model id, so discovery reports
  * "Gemini 3.7 Flash (High)" and "(Medium)" and "(Low)" as three models. Passing those
  * straight through triples the picker. Collapsing keeps one row and defers the tier to
- * request time — at the cost of the picker no longer being a per-request effort
- * switch, which is the only such control the VS Code provider API allows.
+ * request time. The provider exposes the available variants through the picker's
+ * per-request Thinking Effort configuration.
  */
 export function collapseTiers(models: ModelSpec[]): ModelSpec[] {
 	const groups = new Map<string, ModelSpec[]>();
@@ -324,6 +307,12 @@ export function resolveTier(model: ModelSpec, effort: 'off' | 'low' | 'medium' |
 		}
 	}
 	return model.id;
+}
+
+/** Keep translation aligned with the resolved wire id, including missing-tier fallback. */
+export function resolveTierSpec(model: ModelSpec, effort: 'off' | 'low' | 'medium' | 'high'): ModelSpec {
+	const id = resolveTier(model, effort);
+	return id === model.id ? model : { ...model, id, thinkingTier: tierOf(id) };
 }
 
 function classify(modelId: string, displayName?: string): QuotaGroup | null {

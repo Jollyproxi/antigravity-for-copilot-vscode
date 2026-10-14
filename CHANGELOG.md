@@ -1,8 +1,46 @@
 # Changelog
 
+## 0.15.12
+
+- Save validated generated images in extension storage and return local image-preview Markdown plus Open image links alongside tool image data.
+- Append missing image previews to a completed Antigravity answer using verified artifacts from the current turn; avoid duplicate embeds and replaying images on later questions. Cancelled, failed, and tool-calling responses do not receive appended previews.
+- Preserve usable tool image output if preview storage is unavailable. Rendering of local previews still depends on the Copilot host; direct file links are included for access.
+
+## 0.15.11
+
+- Support the built-in `image-generator` subagent introduced in agy 1.2.16, while retaining the legacy direct `generate_image` route. Validate the delegated agent identity and recover raster artifacts only from the parent and explicitly linked image session.
+- Distinguish a missing CLI from permission waits, CLI failures, absent image actions, and missing generated artifacts. Preserve native error details before diagnosing absent tool calls; document that the executable is `agy`.
+- Reject oversized image streams instead of accepting an unverifiable partial transcript, and add content-free image-run diagnostics.
+
+## 0.15.10
+
+- Fix the default model picker still showing Gemini 3 Flash and 3.5 Flash from successful gateway discovery. `latest` now keeps only the newest discovered generation per Gemini product line and all its effort tiers; `all` remains the explicit option for older discovered models. Discovered Claude, GPT-OSS, and new Gemini product lines remain available.
+
+## 0.15.9
+
+- Refresh model descriptions for Gemini 3.8 Flash, Claude Sonnet/Opus 4.6/5.5, and GPT-OSS 120B; make account-dependent availability explicit without synthesizing Claude IDs.
+- Reduce the discovery fallback to the current CLI-verified roster, removing retired Gemini Flash generations and Gemini 3.1 Pro.
+- Document discovery-based handling of Gemini 4 Argon without unavailable placeholders, clarify legacy curation behavior, and correct the claim that Gemini Flash never returns thought text. Mark the older capability audit as historical.
+
+## 0.15.8
+
+- Add configurable, default-on Gemini tool-use guidance for focused research, reuse of existing evidence, and grouping independent read-only calls. Keeps user/host instructions and required validation authoritative; leaves available tools, history, effort, and requested tool mode intact.
+- Record the applied guidance revision and emitted tool-call count in request diagnostics for comparison. Fewer tool calls and lower latency remain dependent on model behavior and require live verification.
+
+## 0.15.7
+
+- Exclude temporary investigation files from VSIX packages.
+- Align Gemini thinking configuration with the resolved model tier when using the combined picker, including unavailable-tier fallback.
+- Stop cancelled chat requests during project/token preparation and pending SSE reads; prevent later generation sends while allowing shared authentication work to finish for other requests.
+- Add privacy-safe per-request phase timings, retry attempt diagnostics, UTF-8 request sizes, and cached-token counts to help distinguish preparation, network, and response latency.
+
 ## 0.15.6
 
 - Combine Gemini Pro, Flash, and other Gemini models into one Gemini quota indicator, matching the native Antigravity usage groups. Keep Claude/GPT separate and use the lowest reported remaining quota within each group.
+
+## 0.15.5
+
+- Add contributor credit to [@SamiMitwalli](https://github.com/SamiMitwalli) for the Claude tool-call fix in 0.15.4. This documentation-only repack keeps the same runtime bundle as 0.15.4.
 
 ## 0.15.4
 
@@ -13,7 +51,6 @@
   now forwarded for Claude models, where Gemini already pairs calls to results by name
   and keeps its existing shape. The new `antigravity.toolCallIds` setting selects
   `claude` (default), `all`, or `off`.
-  Thanks to [@SamiMitwalli](https://github.com/SamiMitwalli) for this fix.
 
 ## 0.15.3
 

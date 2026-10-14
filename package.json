@@ -1,8 +1,8 @@
 {
   "name": "antigravity-for-copilot",
   "displayName": "Antigravity Model Bridge",
-  "description": "Unofficial: use Gemini and Claude models from your Google Antigravity account inside native Copilot Chat.",
-  "version": "0.15.6",
+  "description": "Unofficial Antigravity bridge for Copilot Chat: Gemini 3.8 Flash, Claude Sonnet/Opus 4.6/5.5, and GPT-OSS 120B, subject to account availability.",
+  "version": "0.15.12",
   "publisher": "lutfi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -55,7 +55,7 @@
       {
         "name": "antigravity_generate_image",
         "displayName": "Antigravity Image Generation",
-        "modelDescription": "Generate a raster image with the Antigravity backend through the installed Antigravity CLI's native generate_image tool. Returns the generated image inline.",
+        "modelDescription": "Generate a raster image through the installed agy CLI's built-in image-generator subagent, with legacy generate_image support. Returns validated images plus local preview Markdown and Open image links. Include that Markdown in your final answer without changing its file URIs. A generation failure does not imply the CLI is missing; follow the specific error.",
         "userDescription": "Generate an image with the Antigravity backend.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "antigravityGenerateImage",
@@ -164,6 +164,11 @@
           "default": true,
           "markdownDescription": "Show the model's reasoning. Rendered as Copilot Chat's own collapsible **Thinking…** block where VS Code supports it, and as a blockquote above the answer on builds that do not."
         },
+        "antigravity.efficientToolUse": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Guide Gemini chat models to keep research focused, reuse existing evidence, and group independent read-only tool calls when supported. Respects the requested scope and required checks. Turn off to compare behavior without this advisory guidance."
+        },
         "antigravity.toolCallIds": {
           "type": "string",
           "enum": [
@@ -200,10 +205,10 @@
           ],
           "default": "latest",
           "markdownEnumDescriptions": [
-            "Antigravity own published list: the three newest Gemini generations of each line, plus Claude and GPT-OSS. Older Gemini, Flash Lite and internal Tab/Chat/image/tiered models are removed.",
-            "Every model the gateway reports, including older generations and duplicates."
+            "Show only the newest discovered Gemini generation per product line, retaining all its effort tiers, plus discovered Claude and GPT-OSS models. Exclude Flash Lite and internal aliases.",
+            "Keep additional discovered generations and Flash Lite; still exclude non-chat/internal aliases and duplicate display names."
           ],
-          "markdownDescription": "Which discovered models to offer in the picker. Discovery returns everything the backend can route to, including internal aliases; `latest` narrows it to the published model list, and new generations appear on their own."
+          "markdownDescription": "Which discovered models to offer in the picker. Availability varies by account and backend. `latest` applies the bridge's curation policy; `all` keeps additional discovered generations. Neither mode adds unavailable model placeholders."
         },
         "antigravity.effortSelection": {
           "type": "string",

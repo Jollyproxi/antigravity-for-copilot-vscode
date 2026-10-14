@@ -10,6 +10,7 @@ import { manage, ManageDeps, showAuthStatus, signIn } from './ui/manage';
 import { QuotaStatusBar } from './ui/statusBar';
 import { registerAntigravityImageGenerationTool } from './imageGeneration';
 import { registerAntigravityWebSearchTool } from './webSearch';
+import { ImageArtifactStore } from './imageArtifacts';
 
 export function activate(context: vscode.ExtensionContext): void {
 	initLogging(context);
@@ -20,8 +21,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	const client = new GatewayClient(tokens);
 	const projects = new ProjectResolver(client, store);
 	const statusBar = new QuotaStatusBar(context);
+	const imageArtifacts = new ImageArtifactStore(context.globalStorageUri.fsPath);
 
-	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar);
+	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar, imageArtifacts);
 	const deps: ManageDeps = {
 		store,
 		tokens,
@@ -36,7 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('antigravity.showAuthStatus', () => showAuthStatus(deps)),
 		vscode.commands.registerCommand('antigravity.refresh', () => provider.refresh()),
 		vscode.commands.registerCommand('antigravity.openLogs', () => showLogs()),
-		registerAntigravityImageGenerationTool(),
+		registerAntigravityImageGenerationTool(imageArtifacts),
 		registerAntigravityWebSearchTool(),
 		onModelAffectingChange(() => provider.refresh()),
 	);

@@ -7,7 +7,7 @@ import {
 	curateModels,
 	fetchCatalog,
 	ModelSpec,
-	resolveTier,
+	resolveTierSpec,
 	spec,
 } from './api/models';
 import {
@@ -28,6 +28,9 @@ import { SignatureCache } from './translate/thinking';
 import { GenerateContentResponse } from './translate/types';
 import { buildAgentMetadata, buildEnvelope, createSession, orderRequestFields } from './api/agent-metadata';
 import { QuotaStatusBar } from './ui/statusBar';
+import { awaitWithSignal } from './api/cancellation';
+import { RequestTiming } from './timing';
+import { ImageArtifactReference, ImageArtifactStore, missingImagePreviews } from './imageArtifacts';
 
 /**
  * VS Code passes the model picker's `configurationSchema` selections on fields that
@@ -62,6 +65,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		private readonly client: GatewayClient,
 		private readonly projects: ProjectResolver,
 		private readonly statusBar: QuotaStatusBar,
+		private readonly imageArtifacts?: ImageArtifactStore,
 	) {
 		context.subscriptions.push(this._onDidChange);
 		context.subscriptions.push(this.store.onDidChange(() => this.refresh()));
@@ -152,89 +156,104 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		token: vscode.CancellationToken,
 	): Promise<void> {
 		const op = newOperationId();
-		const spec = this.specs.get(model.id) ?? fallbackSpec(model);
-
-		// The picker selection wins over the setting: `configurationSchema` puts a
-		// Thinking Effort control next to the model, and that is the per-request lever.
-		const runtime = options as RuntimeResponseOptions;
-		const modelOptions = options.modelOptions as Record<string, unknown> | undefined;
-		const settingEffort = config.reasoningEffort();
-		const fallbackEffort: Effort = settingEffort === 'off' ? 'low' : settingEffort;
-		const { effort, source: effortSource } = resolveEffort(
-			{
-				modelOptions,
-				modelConfiguration: runtime.modelConfiguration,
-				configuration: runtime.configuration,
-			},
-			fallbackEffort,
-		);
-
-		// A collapsed entry stands in for several tier-specific model ids.
-		const wireModel = resolveTier(spec, effort);
-
-		// Claude needs a non-empty tool_use id once the gateway forwards to Anthropic;
-		// Gemini pairs calls to results by name and keeps its known-good shape.
-		const toolCallIds = config.toolCallIds();
-		const sendToolCallIds =
-			toolCallIds === 'all' || (toolCallIds === 'claude' && spec.family === 'claude');
-
-		const { request, names } = buildRequest({
-			model: spec,
-			messages,
-			tools: options.tools,
-			toolMode: options.toolMode,
-			modelOptions,
-			reasoningEffort: settingEffort === 'off' ? 'off' : effort,
-			includeThoughts: config.showThinking(),
-			sendToolCallIds,
-			signatures: this.signatures,
-		});
-
-		const project = await this.projects.resolve(op, config.projectId());
-
-		// The gateway expects the agent harness envelope: telemetry labels and a
-		// session id inside `request`, wrapped in an outer object whose field order
-		// matches the real client. Without it we are a different client to them.
-		const metadata = buildAgentMetadata(this.session, request, wireModel, Date.now());
-		const inner = orderRequestFields({
-			...(request as unknown as Record<string, unknown>),
-			labels: metadata.labels,
-			sessionId: metadata.sessionId,
-		});
-		const body = buildEnvelope({
-			project,
-			model: wireModel,
-			request: inner,
-			requestId: metadata.requestId,
-		});
-
-		log.info(op, 'chat request', {
-			model: wireModel,
-			effort,
-			effortFrom: effortSource,
-			modelConfigKeys: Object.keys(runtime.modelConfiguration ?? {}).join(',') || 'none',
-			thoughtsRequested: config.showThinking(),
-			toolCallIdsSetting: toolCallIds,
-			sendToolCallIds,
-			contents: request.contents.length,
-			tools: request.tools?.[0]?.functionDeclarations?.length ?? 0,
-			toolMode: options.toolMode,
-		});
-
-		// Cancellation has to reach the socket, not just stop the loop, or a stopped
-		// response keeps burning quota server-side.
+		const timing = new RequestTiming(op);
+		timing.mark('providerStart');
 		const controller = new AbortController();
 		const cancelSub = token.onCancellationRequested(() => controller.abort());
-
-		const state = newEmitState();
-		const context = {
-			names,
-			signatures: this.signatures,
-			showThinking: config.showThinking(),
-			progress,
-		};
+		if (token.isCancellationRequested) controller.abort();
+		let outcome: 'complete' | 'cancelled' | 'failed' = 'failed';
 
 		try {
+			controller.signal.throwIfAborted();
+			const spec = this.specs.get(model.id) ?? fallbackSpec(model);
+			const showThinking = config.showThinking();
+
+			// The picker selection wins over the setting: `configurationSchema` puts a
+			// Thinking Effort control next to the model, and that is the per-request lever.
+			const runtime = options as RuntimeResponseOptions;
+			const modelOptions = options.modelOptions as Record<string, unknown> | undefined;
+			const settingEffort = config.reasoningEffort();
+			const fallbackEffort: Effort = settingEffort === 'off' ? 'low' : settingEffort;
+			const { effort, source: effortSource } = resolveEffort(
+				{
+					modelOptions,
+					modelConfiguration: runtime.modelConfiguration,
+					configuration: runtime.configuration,
+				},
+				fallbackEffort,
+			);
+
+			// A collapsed entry stands in for several tier-specific model ids.
+			const resolved = resolveTierSpec(spec, effort);
+			const wireModel = resolved.id;
+
+			// Claude needs a non-empty tool_use id once the gateway forwards to Anthropic;
+			// Gemini pairs calls to results by name and keeps its known-good shape.
+			const toolCallIds = config.toolCallIds();
+			const sendToolCallIds =
+				toolCallIds === 'all' || (toolCallIds === 'claude' && spec.family === 'claude');
+
+			const { request, names, toolGuidance } = buildRequest({
+				model: resolved,
+				messages,
+				tools: options.tools,
+				toolMode: options.toolMode,
+				modelOptions,
+				reasoningEffort: settingEffort === 'off' ? 'off' : effort,
+				includeThoughts: showThinking,
+				efficientToolUse: config.efficientToolUse(),
+				sendToolCallIds,
+				signatures: this.signatures,
+			});
+
+			timing.mark('translationDone');
+			timing.mark('projectStart');
+			const project = await awaitWithSignal(() => this.projects.resolve(op, config.projectId()), controller.signal);
+			controller.signal.throwIfAborted();
+			timing.mark('projectEnd');
+
+			// The gateway expects the agent harness envelope: telemetry labels and a
+			// session id inside `request`, wrapped in an outer object whose field order
+			// matches the real client. Without it we are a different client to them.
+			const metadata = buildAgentMetadata(this.session, request, wireModel, Date.now());
+			const inner = orderRequestFields({
+				...(request as unknown as Record<string, unknown>),
+				labels: metadata.labels,
+				sessionId: metadata.sessionId,
+			});
+			const body = buildEnvelope({
+				project,
+				model: wireModel,
+				request: inner,
+				requestId: metadata.requestId,
+			});
+
+			log.info(op, 'chat request', {
+				model: wireModel,
+				effort,
+				effortFrom: effortSource,
+				modelConfigKeys: Object.keys(runtime.modelConfiguration ?? {}).join(',') || 'none',
+				thoughtsRequested: showThinking,
+				toolCallIdsSetting: toolCallIds,
+				sendToolCallIds,
+				contents: request.contents.length,
+				tools: request.tools?.[0]?.functionDeclarations?.length ?? 0,
+				toolMode: options.toolMode,
+				toolGuidance,
+			});
+
+			const state = newEmitState();
+			const context = {
+				names,
+				signatures: this.signatures,
+				showThinking,
+				progress,
+				onPart: (kind: 'thought' | 'answer' | 'tool') => {
+					timing.once(kind === 'thought' ? 'firstThought' : kind === 'answer' ? 'firstAnswer' : 'firstTool');
+				},
+			};
+
+			controller.signal.throwIfAborted();
 			const response = await this.client.post({
 				op,
 				action: 'streamGenerateContent',
@@ -242,19 +261,31 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 				stream: true,
 				endpoints: config.generationEndpoints(),
 				signal: controller.signal,
+				timing,
 			});
 
-			for await (const chunk of readSse<GenerateContentResponse>(response, op)) {
-				if (token.isCancellationRequested) {
-					break;
-				}
+			for await (const chunk of readSse<GenerateContentResponse>(response, op, controller.signal)) {
+				controller.signal.throwIfAborted();
+				timing.once('firstSse');
 				emitChunk(chunk, context, state);
 			}
+			controller.signal.throwIfAborted();
 			// A stream may end immediately after a thought part (for example when the
 			// gateway sends usage/finish metadata in a separate final event). Close the
 			// native thinking block even when no answer/tool part follows it.
 			if (!token.isCancellationRequested) {
 				closeThinkingPart(context, state);
+			}
+			// Tool results and the final answer are separate UI surfaces. Append only
+			// our own verified artifacts from this turn when the model omitted them.
+			if (state.toolCallIndex === 0 && this.imageArtifacts) {
+				const references = currentTurnImageReferences(messages, this.imageArtifacts);
+				const previews = missingImagePreviews(references, state.textBuffer);
+				if (previews) {
+					controller.signal.throwIfAborted();
+					timing.once('firstAnswer');
+					progress.report(new vscode.LanguageModelTextPart(`\n\n${previews}`));
+				}
 			}
 
 			const note = finishNote(state.finishReason);
@@ -276,10 +307,14 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 				promptTokens: state.usage?.promptTokenCount,
 				outputTokens: state.usage?.candidatesTokenCount,
 				thoughtTokens: state.usage?.thoughtsTokenCount,
+				cachedTokens: state.usage?.cachedContentTokenCount,
 				thoughtParts: state.thoughtParts,
+				toolCalls: state.toolCallIndex,
 			});
+			outcome = 'complete';
 		} catch (error) {
-			if (token.isCancellationRequested) {
+			if (controller.signal.aborted || token.isCancellationRequested) {
+				outcome = 'cancelled';
 				log.info(op, 'chat cancelled');
 				return;
 			}
@@ -292,6 +327,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 			throw toLanguageModelError(error);
 		} finally {
 			cancelSub.dispose();
+			timing.finish(outcome);
 		}
 	}
 
@@ -344,4 +380,23 @@ function messageText(message: vscode.LanguageModelChatRequestMessage): string {
 		.filter((part): part is vscode.LanguageModelTextPart => part instanceof vscode.LanguageModelTextPart)
 		.map((part) => part.value)
 		.join('');
+}
+
+/** Only tool results after the latest user instruction belong to this generation turn. */
+export function currentTurnImageReferences(messages: readonly vscode.LanguageModelChatRequestMessage[], artifacts: ImageArtifactStore): ImageArtifactReference[] {
+	const groups: ImageArtifactReference[][] = [];
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		const references: ImageArtifactReference[] = [];
+		for (const part of message.content) {
+			if (!(part instanceof vscode.LanguageModelToolResultPart)) continue;
+			for (const item of part.content) {
+				if (!(item instanceof vscode.LanguageModelTextPart)) continue;
+				references.push(...artifacts.findInText(item.value));
+			}
+		}
+		groups.unshift(references);
+		if (message.role === vscode.LanguageModelChatMessageRole.User && message.content.some(part => part instanceof vscode.LanguageModelTextPart && part.value.trim().length > 0)) break;
+	}
+	return [...new Map(groups.flat().map(reference => [reference.uri, reference])).values()];
 }

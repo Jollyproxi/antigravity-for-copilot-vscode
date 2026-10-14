@@ -3,6 +3,8 @@ import { GatewayError, toGatewayError } from './errors';
 import { httpFetch } from './http';
 import { TokenManager } from '../auth/tokens';
 import { log } from '../log';
+import { awaitWithSignal } from './cancellation';
+import { RequestTiming } from '../timing';
 
 export type EndpointSet = readonly string[];
 
@@ -107,6 +109,8 @@ export interface RequestOptions {
 	signal?: AbortSignal;
 	/** Set for `streamGenerateContent`; adds `?alt=sse` and the SSE Accept header. */
 	stream?: boolean;
+	/** Shared generation timeline; absent for standalone discovery/auth calls. */
+	timing?: RequestTiming;
 }
 
 /**
@@ -126,20 +130,23 @@ export class GatewayClient {
 
 	/** Returns the raw response so the caller can read the SSE body incrementally. */
 	async post(options: RequestOptions): Promise<Response> {
+		options.signal?.throwIfAborted();
 		const endpoints = options.endpoints ?? (options.stream ? GENERATION_ENDPOINTS : DISCOVERY_ENDPOINTS);
 		let lastError: GatewayError | undefined;
+		let attempt = 0;
 
 		for (const endpoint of endpoints) {
 			try {
-				return await this.attempt(endpoint, options, false);
+				return await this.attempt(endpoint, options, false, ++attempt);
 			} catch (error) {
+				options.signal?.throwIfAborted();
 				if (!(error instanceof GatewayError)) {
 					throw error;
 				}
 				if (error.isUnauthenticated) {
 					// Force a refresh and retry this same endpoint once.
 					log.warn(options.op, 'unauthenticated, refreshing and retrying');
-					return await this.attempt(endpoint, options, true);
+					return await this.attempt(endpoint, options, true, ++attempt);
 				}
 				if (!error.isEndpointFailure) {
 					throw error;
@@ -152,11 +159,15 @@ export class GatewayClient {
 		throw lastError ?? new Error('No Antigravity endpoint accepted the request.');
 	}
 
-	private async attempt(endpoint: string, options: RequestOptions, forceRefresh: boolean): Promise<Response> {
+	private async attempt(endpoint: string, options: RequestOptions, forceRefresh: boolean, attempt: number): Promise<Response> {
+		options.signal?.throwIfAborted();
+		options.timing?.mark('tokenStart', { attempt });
 		if (forceRefresh) {
-			await this.tokens.invalidateActive();
+			await awaitWithSignal(() => this.tokens.invalidateActive(), options.signal);
 		}
-		const accessToken = await this.tokens.accessToken();
+		const accessToken = await awaitWithSignal(() => this.tokens.accessToken(), options.signal);
+		options.signal?.throwIfAborted();
+		options.timing?.mark('tokenEnd', { attempt });
 
 		const query = options.stream ? '?alt=sse' : '';
 		const url = `${endpoint}/v1internal:${options.action}${query}`;
@@ -172,18 +183,23 @@ export class GatewayClient {
 		};
 
 		const payload = JSON.stringify(options.body);
-		log.debug(options.op, 'request', { action: options.action, endpoint, bytes: payload.length });
+		const bytes = Buffer.byteLength(payload, 'utf8');
+		log.debug(options.op, 'request', { action: options.action, endpoint, bytes });
 		const shape = summarizeRequest(options.body);
 		if (shape) {
 			log.debug(options.op, 'request shape', shape);
 		}
 
+		options.signal?.throwIfAborted();
+		options.timing?.mark('httpStart', { attempt, bytes });
 		const response = await httpFetch(url, {
 			method: 'POST',
 			headers,
 			body: payload,
 			signal: options.signal,
 		});
+		options.timing?.mark('headers', { attempt, status: response.status });
+		options.signal?.throwIfAborted();
 
 		if (!response.ok) {
 			throw await toGatewayError(response);
