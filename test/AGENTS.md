@@ -13,6 +13,8 @@
 - Provider regressions also cover resolved effort payloads, preparation/stream cancellation, and content-free phase timings; `client.test.ts` covers token waits, shared refresh, retries, request summaries, and transport timing.
 - `models.test.ts` covers discovery parsing, curation, tier collapsing/resolution, quota groups, and fallback models.
 - `statusBar.test.ts` covers grouped quota labels and missing/exhausted quota using a mocked status bar.
+- `accountPlan.test.ts` covers actual versus offered tiers, per-account caching, timeout, and invalidation. Provider/client tests cover non-blocking plan loading, account-bound retries, picker counts, and stale-result suppression; status bar tests cover plan updates and separate quota/reset sections.
+- Credit regressions cover exact int64 sums, explicit zero versus unknown/malformed balances, tier isolation, cache refresh, and separate status/tooltip display across account switches.
 - `schema.test.ts` covers schema normalization and tool-name sanitization/mapping.
 - `stream.test.ts` covers SSE framing and parsing.
 - `translate.test.ts` covers outgoing/incoming translation, tool calls/results, images, signatures, thinking, usage reporting, and finish behavior, including tool-call id emission and its omission when disabled.

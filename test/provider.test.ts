@@ -2,6 +2,69 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { AntigravityProvider } from '../src/provider';
 import { log } from '../src/log';
+import { config } from '../src/config';
+import { AccountPlan } from '../src/api/accountPlan';
+
+describe('account plan discovery', () => {
+	afterEach(() => vi.restoreAllMocks());
+	function harness() {
+		let finish!: (plan: AccountPlan) => void;
+		const pending = new Promise<AccountPlan>(resolve => { finish = resolve; });
+		const account = { email: 'first@example.invalid', refreshToken: 'synthetic' };
+		const store = { active: vi.fn().mockResolvedValue(account), onDidChange: () => ({ dispose() {} }) };
+		const plans = { peek: vi.fn(), get: vi.fn().mockReturnValue(pending), invalidate: vi.fn() };
+		const status = { update: vi.fn(), setPlan: vi.fn(), setLoading: vi.fn(), setSignedOut: vi.fn() };
+		const client = { postJson: vi.fn().mockResolvedValue({ models: {
+			'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+			'gemini-3.8-flash-low': { displayName: 'Gemini 3.8 Flash (Low)' },
+			'gemini-3-flash': { displayName: 'Gemini 3 Flash' },
+			'gpt-oss-120b-medium': { displayName: 'GPT-OSS 120B (Medium)' },
+		} }) };
+		const context = { subscriptions: [] as vscode.Disposable[] };
+		const provider = new AntigravityProvider(context as any, store as any, {} as any,
+			client as any, { resolve: async () => 'synthetic-project' } as any, status as any, undefined, plans as any);
+		return { provider, store, account, plans, status, client, finish, context,
+			discover: () => provider.provideLanguageModelChatInformation({ silent: true }, {} as any) };
+	}
+
+	it('returns curated models while plan is pending and reports the actual picker count', async () => {
+		vi.spyOn(config, 'hiddenModels').mockReturnValue(['gpt-oss-120b-medium']);
+		const h = harness();
+		const models = await h.discover();
+		expect(models).toHaveLength(1);
+		expect(h.status.update).toHaveBeenCalledWith(expect.anything(), h.account.email,
+			expect.objectContaining({ modelCount: 1, plan: undefined }));
+		expect(h.client.postJson).toHaveBeenCalledWith(expect.objectContaining({ account: h.account }));
+		expect(h.status.setPlan).not.toHaveBeenCalled();
+		h.finish({ label: 'Pro' });
+		await Promise.resolve();
+		expect(h.status.setPlan).toHaveBeenCalledExactlyOnceWith(h.account.email, { label: 'Pro' });
+	});
+
+	it.each(['refresh', 'switch', 'signout', 'dispose'])('ignores late plan results after %s', async action => {
+		const h = harness();
+		await h.discover();
+		if (action === 'dispose') {
+			for (const subscription of h.context.subscriptions) subscription.dispose();
+		} else {
+			h.provider.refresh(); // Store changes are wired to refresh in the constructor.
+			if (action === 'switch') h.store.active.mockResolvedValue({ ...h.account, email: 'second@example.invalid' });
+			if (action === 'signout') h.store.active.mockResolvedValue(undefined);
+			if (action !== 'refresh') await h.discover();
+		}
+		h.finish({ label: 'Pro' });
+		await Promise.resolve();
+		expect(h.status.setPlan.mock.calls.some(([email]) => email === h.account.email)).toBe(false);
+	});
+
+	it('discards a discovery result when the active account changes during the request', async () => {
+		const h = harness();
+		h.store.active.mockResolvedValueOnce(h.account).mockResolvedValue({ ...h.account, email: 'second@example.invalid' });
+		expect(await h.discover()).toEqual([]);
+		expect(h.status.update).not.toHaveBeenCalled();
+		expect(h.plans.get).not.toHaveBeenCalled();
+	});
+});
 
 function sseResponse(payload: unknown): Response {
 	const stream = new ReadableStream<Uint8Array>({

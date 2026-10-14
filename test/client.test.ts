@@ -196,4 +196,24 @@ describe('GatewayClient cancellation and phase timings', () => {
 		expect(tokens.accessToken).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(httpFetch).mock.calls.map(([url]) => url)).toEqual(Array(2).fill('https://first.invalid/v1internal:streamGenerateContent?alt=sse'));
 	});
+
+	it('keeps account metadata and its 401 retry bound to the captured account', async () => {
+		const account = { email: 'captured@example.invalid', refreshToken: 'PRIVATE_REFRESH' };
+		const tokens = {
+			accessTokenFor: vi.fn().mockResolvedValue('PRIVATE_TOKEN'), accessToken: vi.fn(),
+			invalidate: vi.fn(), invalidateActive: vi.fn(),
+		};
+		const debug = vi.spyOn(log, 'debug');
+		vi.mocked(httpFetch).mockResolvedValueOnce(new Response('{}', { status: 401 })).mockResolvedValueOnce(new Response('{}'));
+		await new GatewayClient(tokens as any).postJson({
+			op: 'synthetic', action: 'loadCodeAssist', body: {}, endpoints: ['https://synthetic.invalid'], account,
+		});
+		expect(tokens.accessTokenFor.mock.calls).toEqual([[account], [account]]);
+		expect(tokens.invalidate).toHaveBeenCalledExactlyOnceWith(account.email);
+		expect(tokens.accessToken).not.toHaveBeenCalled();
+		expect(tokens.invalidateActive).not.toHaveBeenCalled();
+		for (const [, init] of vi.mocked(httpFetch).mock.calls) expect(init?.body).toBe('{}');
+		expect(JSON.stringify(debug.mock.calls)).not.toContain('PRIVATE_');
+		expect(JSON.stringify(debug.mock.calls)).not.toContain(account.email);
+	});
 });

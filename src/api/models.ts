@@ -1,6 +1,7 @@
 import { GatewayClient } from './client';
 import { DISCOVERY_ENDPOINTS } from './constants';
 import { log } from '../log';
+import { Account } from '../auth/store';
 
 export type Family = 'gemini' | 'claude' | 'gpt-oss';
 
@@ -88,7 +89,7 @@ export const FALLBACK_MODELS: ModelSpec[] = [
 	spec('gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)'),
 ];
 
-export async function fetchCatalog(client: GatewayClient, op: string, project: string): Promise<Catalog> {
+export async function fetchCatalog(client: GatewayClient, op: string, project: string, account?: Account): Promise<Catalog> {
 	let response: FetchAvailableModelsResponse;
 	try {
 		response = await client.postJson<FetchAvailableModelsResponse>({
@@ -96,6 +97,7 @@ export async function fetchCatalog(client: GatewayClient, op: string, project: s
 			action: 'fetchAvailableModels',
 			endpoints: DISCOVERY_ENDPOINTS,
 			body: { project },
+			...(account ? { account } : {}),
 		});
 	} catch (error) {
 		// Loud, not silent: a stale picker with no quota is the visible symptom, and the

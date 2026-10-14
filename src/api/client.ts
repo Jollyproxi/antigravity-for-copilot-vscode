@@ -5,6 +5,7 @@ import { TokenManager } from '../auth/tokens';
 import { log } from '../log';
 import { awaitWithSignal } from './cancellation';
 import { RequestTiming } from '../timing';
+import { Account } from '../auth/store';
 
 export type EndpointSet = readonly string[];
 
@@ -111,6 +112,8 @@ export interface RequestOptions {
 	stream?: boolean;
 	/** Shared generation timeline; absent for standalone discovery/auth calls. */
 	timing?: RequestTiming;
+	/** Pin account metadata/discovery requests across active-account switches. Never logged. */
+	account?: Account;
 }
 
 /**
@@ -163,9 +166,11 @@ export class GatewayClient {
 		options.signal?.throwIfAborted();
 		options.timing?.mark('tokenStart', { attempt });
 		if (forceRefresh) {
-			await awaitWithSignal(() => this.tokens.invalidateActive(), options.signal);
+			if (options.account) this.tokens.invalidate(options.account.email);
+			else await awaitWithSignal(() => this.tokens.invalidateActive(), options.signal);
 		}
-		const accessToken = await awaitWithSignal(() => this.tokens.accessToken(), options.signal);
+		const accessToken = await awaitWithSignal(() => options.account
+			? this.tokens.accessTokenFor(options.account) : this.tokens.accessToken(), options.signal);
 		options.signal?.throwIfAborted();
 		options.timing?.mark('tokenEnd', { attempt });
 

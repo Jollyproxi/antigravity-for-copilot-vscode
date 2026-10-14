@@ -11,6 +11,7 @@ import { QuotaStatusBar } from './ui/statusBar';
 import { registerAntigravityImageGenerationTool } from './imageGeneration';
 import { registerAntigravityWebSearchTool } from './webSearch';
 import { ImageArtifactStore } from './imageArtifacts';
+import { AccountPlanService } from './api/accountPlan';
 
 export function activate(context: vscode.ExtensionContext): void {
 	initLogging(context);
@@ -22,8 +23,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	const projects = new ProjectResolver(client, store);
 	const statusBar = new QuotaStatusBar(context);
 	const imageArtifacts = new ImageArtifactStore(context.globalStorageUri.fsPath);
+	const plans = new AccountPlanService(client);
+	context.subscriptions.push(plans);
 
-	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar, imageArtifacts);
+	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar, imageArtifacts, plans);
 	const deps: ManageDeps = {
 		store,
 		tokens,

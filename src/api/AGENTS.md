@@ -10,6 +10,8 @@
 - `constants.ts` owns endpoint order, OAuth/gateway constants, user agent, and bootstrap metadata.
 - `agent-metadata.ts` owns session identifiers, request metadata/envelopes, and client-compatible field ordering.
 - `models.ts` and `modelInfo.ts` own catalogue parsing, curation, effort tiers, quota buckets, and picker metadata.
+- `accountPlan.ts` reads authenticated account tier metadata for display, with a bounded background lookup and per-account cache; never infer a subscription from quota, model availability, or upgrade offers.
+- Account credits come from the selected tier's `availableCredits` entries of type `GOOGLE_ONE_AI`; sum valid int64 string amounts exactly, keep missing/malformed balances unknown, and never substitute quota percentages or offer-tier credits.
 - `stream.ts` owns incremental SSE framing and JSON event parsing.
 - `cancellation.ts` stops a caller's wait on shared project/token work without aborting other consumers.
 - `credentials.example.ts` documents the required local OAuth credential module; `credentials.ts` is ignored and private.
@@ -20,6 +22,7 @@
 - Keep the `User-Agent` fingerprint aligned with the locally verified Antigravity CLI release when backend model availability changes.
 - Keep gateway headers minimal. Do not add spoofed or rotating CLI headers such as `X-Goog-Api-Client`.
 - Retry only the transient statuses encoded in the client and honor cancellation during requests and retry delays.
+- Bind account metadata requests and their token-refresh retries to the captured account. Never serialize account credentials into request bodies or logs.
 - Preserve the real client's envelope field order, five-segment request id, telemetry labels, and FNV-1a session id.
 - Parse `fetchAvailableModels` as a map keyed by model id. Keep fallback models for discovery failure, not as a substitute for malformed successful data.
 - Default model curation keeps only the newest discovered Gemini generation per line and all its effort tiers, excluding Flash Lite and internal Tab/Chat/image/tiered aliases. New product lines pass through discovery. `all` bypasses generation/Flash Lite filtering but still deduplicates and excludes non-chat aliases. Keep the fallback roster synchronized with CLI-visible current models; never add unavailable preview placeholders or guessed IDs.

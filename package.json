@@ -2,7 +2,7 @@
   "name": "antigravity-for-copilot",
   "displayName": "Antigravity Model Bridge",
   "description": "Unofficial Antigravity bridge for Copilot Chat: Gemini 3.8 Flash, Claude Sonnet/Opus 4.6/5.5, and GPT-OSS 120B, subject to account availability.",
-  "version": "0.15.12",
+  "version": "0.15.14",
   "publisher": "lutfi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -236,7 +236,7 @@
         "antigravity.showStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "Show remaining Antigravity quota in the status bar."
+          "description": "Show the reported account plan, remaining Antigravity quota, and AI credit balance in the status bar. Hover for account and reset details."
         },
         "antigravity.cliPath": {
           "type": "string",

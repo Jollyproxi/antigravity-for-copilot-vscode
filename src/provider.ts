@@ -17,7 +17,7 @@ import {
 	ProviderChatInformation,
 } from './api/modelInfo';
 import { readSse } from './api/stream';
-import { AccountStore } from './auth/store';
+import { Account, AccountStore } from './auth/store';
 import { TokenManager } from './auth/tokens';
 import { ProjectResolver } from './auth/project';
 import { config } from './config';
@@ -31,6 +31,7 @@ import { QuotaStatusBar } from './ui/statusBar';
 import { awaitWithSignal } from './api/cancellation';
 import { RequestTiming } from './timing';
 import { ImageArtifactReference, ImageArtifactStore, missingImagePreviews } from './imageArtifacts';
+import { AccountPlanService } from './api/accountPlan';
 
 /**
  * VS Code passes the model picker's `configurationSchema` selections on fields that
@@ -52,7 +53,8 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 
 	private readonly signatures = new SignatureCache();
 	private readonly specs = new Map<string, ModelSpec>();
-	private catalog?: { value: Catalog; at: number };
+	private catalog?: { value: Catalog; at: number; email: string };
+	private refreshRevision = 0;
 	/** Conversation-scoped telemetry identity, keyed off the open workspace. */
 	private readonly session = createSession(
 		vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? 'vscode://antigravity',
@@ -66,14 +68,19 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		private readonly projects: ProjectResolver,
 		private readonly statusBar: QuotaStatusBar,
 		private readonly imageArtifacts?: ImageArtifactStore,
+		private readonly plans?: AccountPlanService,
 	) {
 		context.subscriptions.push(this._onDidChange);
 		context.subscriptions.push(this.store.onDidChange(() => this.refresh()));
+		context.subscriptions.push({ dispose: () => { this.refreshRevision++; } });
 	}
 
 	/** Invalidates discovery and asks VS Code to re-query the model list. */
 	refresh(): void {
+		this.refreshRevision++;
 		this.catalog = undefined;
+		this.plans?.invalidate();
+		this.statusBar.setLoading?.();
 		this._onDidChange.fire();
 	}
 
@@ -82,7 +89,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		_token: vscode.CancellationToken,
 	): Promise<ProviderChatInformation[]> {
 		const op = newOperationId();
-		const account = await this.store.active();
+		let account = await this.store.active();
 
 		if (!account) {
 			// Silent means "resolve what you can without UI" — offering no models is the
@@ -101,6 +108,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 			}
 			try {
 				await this.tokens.addAccount();
+				account = await this.store.active();
 			} catch (error) {
 				this.statusBar.setSignedOut();
 				if (!(error instanceof vscode.CancellationError)) {
@@ -109,11 +117,13 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 				return [];
 			}
 		}
+		if (!account) { this.statusBar.setSignedOut(); return []; }
+		const revision = this.refreshRevision;
 
 		try {
-			const catalog = await this.loadCatalog(op);
-			const signedInAs = (await this.store.active())?.email ?? 'unknown';
-			this.statusBar.update(catalog, signedInAs);
+			const catalog = await this.loadCatalog(op, account);
+			const active = await this.store.active();
+			if (revision !== this.refreshRevision || active?.email !== account.email) return [];
 
 			const hidden = new Set(config.hiddenModels());
 			this.specs.clear();
@@ -133,12 +143,23 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 				offered: curated.map((m) => m.id).join(','),
 			});
 
-			return curated
+			const offered = curated
 				.filter((model) => !hidden.has(model.id))
 				.map((model) => {
 					this.specs.set(model.id, model);
 					return toChatInformation(model, defaultEffort);
 				});
+			this.statusBar.update(catalog, account.email, {
+				plan: this.plans?.peek(account.email), modelCount: offered.length,
+				updatedAt: this.catalog?.at ?? Date.now(),
+			});
+			if (this.plans) {
+				const email = account.email;
+				void this.plans.get(account).then(plan => {
+					if (revision === this.refreshRevision) this.statusBar.setPlan(email, plan);
+				});
+			}
+			return offered;
 		} catch (error) {
 			log.error(op, 'discovery failed', { error });
 			if (!options.silent) {
@@ -342,13 +363,14 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		return Math.ceil(value.length / 3.5);
 	}
 
-	private async loadCatalog(op: string): Promise<Catalog> {
-		if (this.catalog && Date.now() - this.catalog.at < CATALOG_TTL_MS) {
+	private async loadCatalog(op: string, account: Account): Promise<Catalog> {
+		if (this.catalog?.email === account.email && Date.now() - this.catalog.at < CATALOG_TTL_MS) {
 			return this.catalog.value;
 		}
+		const revision = this.refreshRevision;
 		const project = await this.projects.resolve(op, config.projectId());
-		const value = await fetchCatalog(this.client, op, project);
-		this.catalog = { value, at: Date.now() };
+		const value = await fetchCatalog(this.client, op, project, account);
+		if (revision === this.refreshRevision) this.catalog = { value, at: Date.now(), email: account.email };
 		return value;
 	}
 }

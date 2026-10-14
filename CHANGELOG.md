@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.14
+
+- Include the reported Google One AI credit balance in the status bar and a separate AI credits tooltip section, alongside the existing Gemini and Claude/GPT baseline quotas.
+- Reuse background account metadata and its cache for credits; preserve exact integer balances and explicit zero, while showing "Not reported" for missing or malformed balances. This display does not enable credit spending.
+
+## 0.15.13
+
+- Show the account's reported plan beside compact Gemini and Claude/GPT quota summaries. The tooltip separates account/plan, remaining quota and local reset times for each group, actual picker model count, and quota update time.
+- Load plan metadata in the background with a short timeout and per-account cache. Prefer the backend's paid tier, show "Not reported" when unavailable, and discard stale results after account changes or refreshes.
+
 ## 0.15.12
 
 - Save validated generated images in extension storage and return local image-preview Markdown plus Open image links alongside tool image data.

@@ -36,9 +36,9 @@ describe('QuotaStatusBar', () => {
 
 		bar.update(await fetchCatalog(client, 'test', 'test-project'), 'test@example.com');
 
-		expect(item.text).toBe('$(rocket) Gemini 80% · Claude 30%');
-		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Gemini (all models)**: 80% remaining') });
-		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Claude / GPT-OSS**: 30% remaining') });
+		expect(item.text).toBe('$(rocket) Gemini 80% · Claude/GPT 30%');
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Gemini**  \nRemaining: **80%**') });
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('\n\n**Claude / GPT-OSS**  \nRemaining: **30%**') });
 		expect(item.command).toBe('antigravity.manage');
 		expect(item.show).toHaveBeenCalled();
 	});
@@ -46,12 +46,76 @@ describe('QuotaStatusBar', () => {
 	it('shows exhausted Gemini quota while an unreported Claude quota stays absent', () => {
 		bar.update({ models: [], quota: { gemini: { remainingFraction: 0, modelCount: 2 } }, isFallback: false }, 'test@example.com');
 		expect(item.text).toBe('$(rocket) Gemini 0%');
-		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Claude / GPT-OSS**: not reported') });
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Claude / GPT-OSS**  \nRemaining: **Not reported**') });
+	});
+
+	it('shows credits as a separate balance, including zero, without changing Gemini quota', () => {
+		bar.update({ models: [], quota: { gemini: { remainingFraction: .98, modelCount: 2 } }, isFallback: false },
+			'test@example.com', { plan: { label: 'Pro', aiCredits: '1250' } });
+		expect(item.text).toBe(`$(rocket) Pro · Gemini 98% · Credits ${1250n.toLocaleString()}`);
+		expect((item.tooltip as any).value).toContain(`**AI credits**  \nBalance: **${1250n.toLocaleString()}**`);
+		bar.setPlan('test@example.com', { label: 'Pro', aiCredits: '0' });
+		expect(item.text).toBe('$(rocket) Pro · Gemini 98% · Credits 0');
+		expect((item.tooltip as any).value).toContain('Balance: **0**');
+		bar.setPlan('test@example.com', { label: 'Pro' });
+		expect(item.text).not.toContain('Credits');
+		expect((item.tooltip as any).value).toContain('Balance: **Not reported**');
+		bar.update({ models: [], quota: {}, isFallback: false }, 'second@example.com');
+		bar.setPlan('test@example.com', { aiCredits: '999' });
+		expect((item.tooltip as any).value).toContain('Balance: **Loading…**');
+		expect(item.text).not.toContain('999');
 	});
 
 	it('does not invent a percentage when discovery falls back', () => {
 		bar.update({ models: [], quota: {}, isFallback: true }, 'test@example.com');
 		expect(item.text).toBe('$(rocket) Antigravity');
 		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('Model discovery failed.') });
+	});
+
+	it('shows plan and separate quota/reset blocks with the actual picker count', () => {
+		bar.update({ models: Array(22).fill({}), quota: {
+			gemini: { remainingFraction: .98, resetTime: '2026-10-15T02:12:53+07:00', modelCount: 15 },
+			claude: { remainingFraction: 1, resetTime: '2026-10-15T03:31:03+07:00', modelCount: 7 },
+		}, isFallback: false }, 'test@example.com', { plan: { label: 'Pro' }, modelCount: 4 });
+		expect(item.text).toBe('$(rocket) Pro · Gemini 98% · Claude/GPT 100%');
+		const tooltip = (item.tooltip as any).value;
+		expect(tooltip).toContain('Plan: **Pro**');
+		expect(tooltip).toContain('Models in picker: **4**');
+		expect(tooltip).not.toContain('22 model');
+		expect(tooltip.match(/Reset:/g)).toHaveLength(2);
+		expect(tooltip).toContain('\n\n**Claude / GPT-OSS**');
+	});
+
+	it('updates plan in the background without changing quota freshness', () => {
+		const time = Date.parse('2026-10-14T12:00:00Z');
+		bar.update({ models: [], quota: {}, isFallback: false }, 'test@example.com', { updatedAt: time });
+		expect((item.tooltip as any).value).toContain('Plan: **Loading…**');
+		bar.setPlan('test@example.com', { label: 'Ultra' });
+		expect((item.tooltip as any).value).toContain('Plan: **Ultra**');
+		expect((item.tooltip as any).value).toContain(new Date(time).toLocaleTimeString());
+		bar.setPlan('test@example.com', {});
+		expect((item.tooltip as any).value).toContain('Plan: **Not reported**');
+	});
+
+	it('does not leak a previous account plan after switching, refresh or sign-out', () => {
+		const catalog = { models: [], quota: {}, isFallback: false };
+		bar.update(catalog, 'first@example.com', { plan: { label: 'Pro' } });
+		bar.update(catalog, 'second@example.com');
+		bar.setPlan('first@example.com', { label: 'Ultra' });
+		expect((item.tooltip as any).value).not.toContain('Ultra');
+		bar.setLoading();
+		bar.setPlan('second@example.com', { label: 'Ultra' });
+		expect(item.text).toBe('$(sync~spin) Antigravity');
+		bar.setSignedOut();
+		bar.setPlan('second@example.com', { label: 'Ultra' });
+		expect(item.text).toContain('signed out');
+	});
+
+	it('escapes account/plan Markdown and does not turn a backend name into a status icon', () => {
+		bar.update({ models: [], quota: { gemini: { modelCount: 1, resetTime: 'invalid-date' } }, isFallback: false },
+			'[account](command:evil)', { plan: { label: '$(warning) [Pro](command:evil)' } });
+		expect(item.text).not.toContain('$(warning)');
+		expect((item.tooltip as any).value).not.toContain('[account](command:evil)');
+		expect((item.tooltip as any).value).not.toContain('Invalid Date');
 	});
 });

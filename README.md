@@ -27,6 +27,8 @@ Requests run on your Antigravity account rather than Copilot premium requests.
   widget, including its prompt breakdown when the installed VS Code build supports it.
 - **Multi-turn reasoning continuity** — thought signatures are replayed so tool-using conversations survive past the first turn.
 - **Quota groups** in the status bar: all Gemini models (including Pro and Flash) share one displayed group; Claude/GPT remains separate, matching the native Antigravity usage display. The percentage is the lowest reported remaining fraction within each group.
+- **Account plan and clearer quota details**: the compact bar shows the reported plan alongside Gemini and Claude/GPT percentages. Hover for the account, separate quota/reset sections (local time), the number of models actually offered in the picker, and the quota update time. Plan metadata comes from the extension's authenticated account (`loadCodeAssist`, paid tier first), loads in the background, and is cached for five minutes. Missing metadata shows **Not reported**, never an inferred Free/Pro plan; unsuccessful lookups are cached for 30 seconds. Refreshing or changing accounts clears the plan cache.
+- **AI credit balance**: when account metadata reports Google One AI credits, the bar also shows `Credits …` and the tooltip includes a separate balance section. Credits share the plan metadata's five-minute cache; use **Antigravity: Refresh Models and Quota** to request fresh data. Missing/invalid balances show **Not reported**, while an explicit zero remains `0`. This is an account credit balance, separate from Gemini and Claude/GPT baseline percentages, and displaying it does not enable spending. See [Google's AI credits guide](https://antigravity.google/docs/cli/credits).
 - **Thinking Effort control** in the picker, next to the model, offering only the tiers the backend can serve.
 - **Multiple accounts**, switched manually.
 
@@ -162,7 +164,7 @@ Under **Settings → Extensions → Antigravity**:
 - `antigravity.toolCallIds` — forward tool-call ids on the wire: `claude` (default), `all`, or `off`
 - `antigravity.projectId` — override project discovery, if you see 403s naming a project
 - `antigravity.endpoint` — pin generation traffic to one gateway host
-- `antigravity.showStatusBar` — show remaining quota
+- `antigravity.showStatusBar` — show the reported account plan, remaining quota, and AI credit balance; hover for details
 - `antigravity.cliPath` — optional path to the `agy` executable used by Antigravity Web Search and Image Generation
 
 Proxies come from `http.proxy` or `HTTPS_PROXY`/`HTTP_PROXY`, with `NO_PROXY` respected.
