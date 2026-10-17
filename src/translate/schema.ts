@@ -78,9 +78,22 @@ function clean(node: unknown): unknown {
 
 	const out: Obj = {};
 
-	// `const: X` has no proto field; a single-value enum says the same thing.
+	// `const: X` has no proto field. String constants map cleanly to a single-value
+	// enum, but non-string constants (boolean, number) cannot be expressed as proto
+	// string enums and must be preserved as description hints instead.
 	if ('const' in node && !('enum' in node)) {
-		out.enum = [node.const];
+		if (typeof node.const === 'string') {
+			out.enum = [node.const];
+		} else {
+			appendHint(out, `const: ${String(node.const)}`);
+			if (!('type' in node)) {
+				if (typeof node.const === 'boolean') {
+					out.type = 'boolean';
+				} else if (typeof node.const === 'number') {
+					out.type = Number.isInteger(node.const) ? 'integer' : 'number';
+				}
+			}
+		}
 	}
 
 	for (const [key, value] of Object.entries(node)) {
@@ -147,9 +160,43 @@ function clean(node: unknown): unknown {
 			out.type = 'object';
 		} else if (out.items) {
 			out.type = 'array';
-		} else if (out.enum) {
-			out.type = 'string';
+		} else if (out.enum && Array.isArray(out.enum)) {
+			if (out.enum.every((entry) => typeof entry === 'string')) {
+				out.type = 'string';
+			} else if (out.enum.every((entry) => typeof entry === 'boolean')) {
+				out.type = 'boolean';
+			} else if (out.enum.every((entry) => typeof entry === 'number')) {
+				out.type = out.enum.every((entry) => Number.isInteger(entry)) ? 'integer' : 'number';
+			} else {
+				out.type = 'string';
+			}
 		}
+	}
+
+	// The Antigravity gateway parses `parameters` with a protobuf JSON parser where
+	// `Schema.enum` is strictly `repeated string enum` (TYPE_STRING). Non-string enum
+	// values (e.g. `[false]`, `[true]`, numbers) or enums on non-string types fail
+	// protobuf deserialization on Gemini and violate JSON Schema validation on Claude.
+	// Filter non-string enums into description hints and keep enum only for string schemas.
+	if (Array.isArray(out.enum)) {
+		const rawEnum = out.enum as unknown[];
+		if (out.type === 'string' && rawEnum.every((entry) => typeof entry === 'string')) {
+			if (rawEnum.length === 0) {
+				delete out.enum;
+			}
+		} else if (out.type === 'string') {
+			const stringified = rawEnum.map((entry) => String(entry));
+			if (stringified.length === 0) {
+				delete out.enum;
+			} else {
+				out.enum = stringified;
+			}
+		} else {
+			appendHint(out, `allowed: ${rawEnum.map((entry) => String(entry)).join(', ')}`);
+			delete out.enum;
+		}
+	} else if ('enum' in out) {
+		delete out.enum;
 	}
 
 	// `required` may only name properties that still exist.

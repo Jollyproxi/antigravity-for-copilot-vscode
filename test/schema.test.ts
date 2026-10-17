@@ -147,9 +147,44 @@ describe('sanitizeSchema', () => {
 	it('recurses through nested properties', () => {
 		const out = sanitizeSchema({
 			type: 'object',
-			properties: { outer: { type: 'object', properties: { inner: { const: 7 } } } },
+			properties: { outer: { type: 'object', properties: { inner: { const: 'v1' } } } },
 		}) as any;
-		expect(out.properties.outer.properties.inner.enum).toEqual([7]);
+		expect(out.properties.outer.properties.inner.enum).toEqual(['v1']);
+	});
+
+	it('strips boolean and non-string enums into description hints', () => {
+		// Antigravity gateway parses parameters as protobuf Schema where enum is repeated string.
+		// Boolean enums (e.g. enum: [false]) fail with `Invalid value ... (TYPE_STRING), false`.
+		const out = sanitizeSchema({
+			type: 'object',
+			properties: {
+				flagFalse: { type: 'boolean', enum: [false] },
+				flagTrue: { type: 'boolean', enum: [true] },
+				numberEnum: { type: 'integer', enum: [1, 2, 3] },
+				constBool: { const: false },
+				constNum: { const: 7 },
+			},
+		}) as any;
+
+		expect(out.properties.flagFalse.enum).toBeUndefined();
+		expect(out.properties.flagFalse.type).toBe('boolean');
+		expect(out.properties.flagFalse.description).toContain('allowed: false');
+
+		expect(out.properties.flagTrue.enum).toBeUndefined();
+		expect(out.properties.flagTrue.type).toBe('boolean');
+		expect(out.properties.flagTrue.description).toContain('allowed: true');
+
+		expect(out.properties.numberEnum.enum).toBeUndefined();
+		expect(out.properties.numberEnum.type).toBe('integer');
+		expect(out.properties.numberEnum.description).toContain('allowed: 1, 2, 3');
+
+		expect(out.properties.constBool.enum).toBeUndefined();
+		expect(out.properties.constBool.type).toBe('boolean');
+		expect(out.properties.constBool.description).toContain('const: false');
+
+		expect(out.properties.constNum.enum).toBeUndefined();
+		expect(out.properties.constNum.type).toBe('integer');
+		expect(out.properties.constNum.description).toContain('const: 7');
 	});
 });
 
