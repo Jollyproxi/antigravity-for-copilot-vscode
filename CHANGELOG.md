@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.15
+
+- Fix requests rejected by the gateway when tool schemas contain boolean or numeric enums and constants, including deeply nested properties. Preserve their types and express unsupported value restrictions as description hints while retaining string enums.
+
 ## 0.15.14
 
 - Include the reported Google One AI credit balance in the status bar and a separate AI credits tooltip section, alongside the existing Gemini and Claude/GPT baseline quotas.
