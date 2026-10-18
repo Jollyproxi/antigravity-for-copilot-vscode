@@ -26,7 +26,7 @@
 - Preserve the real client's envelope field order, five-segment request id, telemetry labels, and FNV-1a session id.
 - Parse `fetchAvailableModels` as a map keyed by model id. Keep fallback models for discovery failure, not as a substitute for malformed successful data.
 - Default model curation keeps only the newest discovered Gemini generation per line and all its effort tiers, excluding Flash Lite and internal Tab/Chat/image/tiered aliases. New product lines pass through discovery. `all` bypasses generation/Flash Lite filtering but still deduplicates and excludes non-chat aliases. Keep the fallback roster synchronized with CLI-visible current models; never add unavailable preview placeholders or guessed IDs.
-- Group all Gemini models together and keep Claude/GPT separate, matching the native client's usage display. When per-model fractions differ, retain the lowest reported fraction; never add or average quota percentages.
+- Display standard Gemini, discovered Gemini Argon, and Claude/GPT as separate quota groups. Identify Argon only within Gemini entries; do not infer quota-pool independence or weekly limits from model names. When per-model fractions differ, retain the lowest reported fraction; never add or average quota percentages.
 - SSE parsing must tolerate arbitrary chunk boundaries, CRLF/LF separators, multi-line `data:` fields, `[DONE]`, and a final unterminated event.
 
 ## Work Guidance

@@ -6,6 +6,7 @@ import { QuotaStatusBar } from '../src/ui/statusBar';
 
 const item = vi.hoisted(() => ({
 	text: '', tooltip: undefined as unknown, name: '', command: '',
+	accessibilityInformation: undefined as { label: string } | undefined,
 	show: vi.fn(), hide: vi.fn(), dispose: vi.fn(),
 }));
 
@@ -84,6 +85,38 @@ describe('QuotaStatusBar', () => {
 		expect(tooltip).not.toContain('22 model');
 		expect(tooltip.match(/Reset:/g)).toHaveLength(2);
 		expect(tooltip).toContain('\n\n**Claude / GPT-OSS**');
+	});
+
+	it('renders all three quota allocations when Argon, Gemini and Claude are reported', () => {
+		bar.update({ models: Array(25).fill({}), quota: {
+			gemini: { remainingFraction: 0.95, resetTime: '2026-10-18T00:00:00Z', modelCount: 6 },
+			argon: { remainingFraction: 0.5, resetTime: '2026-10-24T00:00:00Z', modelCount: 3 },
+			claude: { remainingFraction: 0.8, resetTime: '2026-10-19T00:00:00Z', modelCount: 6 },
+		}, isFallback: false }, 'test@example.com', { plan: { label: 'Pro' } });
+
+		expect(item.text).toBe('$(rocket) Pro · Gemini 95% · Argon 50% · Claude/GPT 80%');
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Gemini**  \nRemaining: **95%**') });
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Gemini 4 Argon**  \nRemaining: **50%**') });
+		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Claude / GPT-OSS**  \nRemaining: **80%**') });
+	});
+
+	it('omits Argon from every display surface when the account does not report it', () => {
+		bar.update({ models: [], quota: { gemini: { remainingFraction: 1, modelCount: 3 } }, isFallback: false }, 'test@example.com');
+		expect(item.text).not.toContain('Argon');
+		expect((item.tooltip as any).value).not.toContain('Argon');
+		expect(item.accessibilityInformation?.label).not.toContain('Argon');
+	});
+
+	it('distinguishes exhausted Argon from unreported quota and clears it on account switches', () => {
+		bar.update({ models: [], quota: { argon: { remainingFraction: 0, modelCount: 3 } }, isFallback: false }, 'first@example.com');
+		expect(item.text).toBe('$(rocket) Argon 0%');
+		expect(item.accessibilityInformation?.label).toContain('Argon: 0%');
+		bar.update({ models: [], quota: { argon: { modelCount: 1 } }, isFallback: false }, 'first@example.com');
+		expect(item.text).not.toContain('Argon');
+		expect((item.tooltip as any).value).toContain('**Gemini 4 Argon**  \nRemaining: **Not reported**');
+		bar.update({ models: [], quota: {}, isFallback: false }, 'second@example.com');
+		expect((item.tooltip as any).value).not.toContain('Argon');
+		expect(item.accessibilityInformation?.label).not.toContain('Argon');
 	});
 
 	it('updates plan in the background without changing quota freshness', () => {

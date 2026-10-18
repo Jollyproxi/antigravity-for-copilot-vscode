@@ -5,8 +5,8 @@ import { Account } from '../auth/store';
 
 export type Family = 'gemini' | 'claude' | 'gpt-oss';
 
-/** Match the native client's usage groups: all Gemini models, and Claude/GPT. */
-export type QuotaGroup = 'gemini' | 'claude';
+/** Display standard Gemini, discovered Gemini Argon, and Claude/GPT separately. */
+export type QuotaGroup = 'gemini' | 'argon' | 'claude';
 
 export interface ModelSpec {
 	id: string;
@@ -171,7 +171,9 @@ function parseGeminiLine(id: string, name: string): GeminiLine | null {
 			? 'flash'
 			: /pro/.test(text)
 				? 'pro'
-				: null;
+				: /argon/.test(text)
+					? 'argon'
+					: null;
 	if (!line) {
 		return null;
 	}
@@ -325,7 +327,7 @@ function classify(modelId: string, displayName?: string): QuotaGroup | null {
 	if (!combined.includes('gemini')) {
 		return null;
 	}
-	return 'gemini';
+	return combined.includes('argon') ? 'argon' : 'gemini';
 }
 
 /** Keeps the tightest constraint across the models sharing a bucket. */
@@ -378,7 +380,8 @@ export function spec(id: string, name: string): ModelSpec {
 	const lower = id.toLowerCase();
 
 	// The gateway does not report limits, so they come from the family — and Gemini Pro
-	// caps output one token below Flash. Sending Flash's 65536 to Pro is rejected as
+	// caps output one token below Flash and Argon's documented synchronous limit.
+	// Sending Flash's 65536 to Pro is rejected as
 	// INVALID_ARGUMENT with no field named, which is unusually hard to trace back.
 	const limits =
 		family === 'claude'
@@ -387,7 +390,7 @@ export function spec(id: string, name: string): ModelSpec {
 				? { context: 131_072, output: 32_768 }
 				: lower.includes('image')
 					? { context: 66_000, output: 33_000 }
-					: lower.includes('flash')
+					: lower.includes('flash') || lower.includes('argon')
 						? { context: 1_048_576, output: 65_536 }
 						: { context: 1_048_576, output: 65_535 };
 
