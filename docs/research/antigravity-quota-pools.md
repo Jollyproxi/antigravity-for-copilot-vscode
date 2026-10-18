@@ -93,3 +93,47 @@ Local checks on October 18 used the installed CLI 1.3.6: `agy models` returned t
 Display discovered Gemini Argon model entries separately from standard Gemini and Claude/GPT. Preserve the lowest reported fraction and earliest valid reset within each display group, without manufacturing weekly/five-hour limits. Omit the Argon tooltip/accessibility section entirely if discovery contains no Argon bucket; explicit zero remains exhausted and a missing fraction remains unknown. Never inject Argon into a successful catalogue or the fallback roster.
 
 Offline regressions cover quota isolation, reset aggregation, aliases, exhausted/unknown balances, account switches, discovered effort tiers, generation curation, and provider wire payloads. Passing fixtures establishes bridge behavior, not a live Argon entitlement or successful generation.
+
+## Update: explicit standard Gemini quota windows (2026-10-18)
+
+### Verified observations
+
+- The installed official `agy` **1.4.2** returned separate standard Gemini weekly and five-hour rows through the read-only `/usage` command. Both have independent remaining percentages and reset timestamps. No model generation was requested.
+- A read-only authenticated `POST` to the existing daily host's `v1internal:retrieveUserQuotaSummary`, with JSON body `{}`, returned top-level `groups`. The standard group is `displayName: "Gemini Models"`; its `buckets` include `bucketId: "gemini-5h", window: "5h"` and `bucketId: "gemini-weekly", window: "weekly"`. Each bucket has its own numeric `remainingFraction` and ISO `resetTime`.
+- In the same probe, `fetchAvailableModels`'s Gemini 3.8 Flash fractions and resets matched the **five-hour** summary bucket, not the weekly bucket. That is an observation for this account and response, not a guarantee for every account or future gateway version. The legacy display must therefore stay unclassified when the explicit summary is absent.
+- The response also contained a separate `Claude and GPT models` group with `3p-5h` and `3p-weekly` buckets. This release intentionally leaves Claude/GPT and Argon displays unchanged. No Argon summary group was observed for the tested account.
+
+### Artifact evidence and boundaries
+
+The inspected installed CLI executable's SHA-256 was
+`4f6c7a807f3fae54bc61e74b8469ac79d07702ade5c62de62041bba44e2a7be0`.
+REA build-metadata evidence ID:
+`ev_f052ad0203f7dfe75360e0f7598f0bee6ff085628f63fe2c94b492b4b6a0b3e7`.
+Separately, ordinary read-only byte inspection found the embedded
+`google/internal/cloud/code/v1internal/quota_summary.proto` schema, including
+`QuotaSummaryGroup`, `QuotaSummaryBucket`, `bucket_id`, `window`, the
+`remaining_fraction`/`remaining_amount` oneof, `disabled`, and `reset_time`.
+These static declarations corroborate the observed response shape; they do not
+by themselves prove runtime requests. REA's metadata inspection did not decompile
+the quota handler or establish dependency authenticity. No MCP/client settings
+were changed to perform this investigation.
+
+### Extension policy
+
+Read only the verified standard Gemini group and exact bucket-ID/window pairs.
+Skip disabled/unknown buckets, preserve explicit zero, leave absent/non-numeric
+fractions unknown, and keep each percentage paired with its own reset. Do not
+infer windows from display labels or timestamp distance. If duplicate known
+buckets occur, retain the lowest numeric fraction and that bucket's reset.
+
+Fetch summary metadata in the background using the extension's captured account,
+not credentials imported from the CLI. Bound requests at five seconds and cache
+successful summaries for one minute (unavailable responses for 30 seconds).
+Refresh/account changes invalidate the cache and pending lookups; provider
+revision and status-bar account checks suppress late results. The legacy
+model-discovery display remains available if the optional endpoint fails.
+
+Offline tests verify parsing, caching, account isolation and mocked UI behavior.
+The endpoint and official CLI were checked live; actual VS Code rendering still
+requires an Extension Development Host. This adds no generation requests, credit
+spending, new model IDs, Argon accounting claims or changes to Claude/GPT quotas.

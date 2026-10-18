@@ -11,6 +11,7 @@
 - `agent-metadata.ts` owns session identifiers, request metadata/envelopes, and client-compatible field ordering.
 - `models.ts` and `modelInfo.ts` own catalogue parsing, curation, effort tiers, quota buckets, and picker metadata.
 - `accountPlan.ts` reads authenticated account tier metadata for display, with a bounded background lookup and per-account cache; never infer a subscription from quota, model availability, or upgrade offers.
+- `geminiQuota.ts` reads standard Gemini's explicit `gemini-5h`/`5h` and `gemini-weekly`/`weekly` buckets from `retrieveUserQuotaSummary`. Keep this optional lookup account-bound, background-only, cached for one minute and bounded at five seconds; never reuse these buckets for Argon or Claude/GPT, infer periods from dates, or turn missing/disabled data into 100%.
 - Account credits come from the selected tier's `availableCredits` entries of type `GOOGLE_ONE_AI`; sum valid int64 string amounts exactly, keep missing/malformed balances unknown, and never substitute quota percentages or offer-tier credits.
 - `stream.ts` owns incremental SSE framing and JSON event parsing.
 - `cancellation.ts` stops a caller's wait on shared project/token work without aborting other consumers.

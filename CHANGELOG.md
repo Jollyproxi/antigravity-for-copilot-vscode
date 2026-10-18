@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.17
+
+- Show standard Gemini's five-hour and weekly quota separately, with each limit's own remaining percentage and local reset time. Read the backend's explicit quota-summary buckets instead of assigning a period to model-discovery percentages.
+- Load Gemini limits in the background with an account-bound, one-minute cache and a five-second timeout. Keep missing limits unknown, fall back to the existing discovery display when unavailable, and clear stale results on refresh or account changes. Argon and Claude/GPT displays are unchanged.
+
 ## 0.15.16
 
 - Display discovered Gemini 4 Argon quota separately from standard Gemini and Claude/GPT-OSS. Omit the Argon section on accounts that do not report it, preserve exhausted versus unknown balances, and clear it when switching accounts.

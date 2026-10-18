@@ -50,6 +50,64 @@ describe('QuotaStatusBar', () => {
 		expect(item.tooltip).toMatchObject({ value: expect.stringContaining('**Claude / GPT-OSS**  \nRemaining: **Not reported**') });
 	});
 
+	it('shows separate Gemini windows and reset times without changing Argon or Claude', () => {
+		const fiveHourReset = '2026-10-18T18:00:00Z';
+		const weeklyReset = '2026-10-24T04:00:00Z';
+		bar.update({ models: [], quota: {
+			gemini: { remainingFraction: .97, modelCount: 3 },
+			argon: { remainingFraction: .5, modelCount: 3 },
+			claude: { remainingFraction: .8, modelCount: 2 },
+		}, isFallback: false }, 'test@example.com', { geminiQuota: {
+			fiveHour: { remainingFraction: .97, resetTime: fiveHourReset },
+			weekly: { remainingFraction: .95, resetTime: weeklyReset },
+		} });
+		expect(item.text).toBe('$(rocket) Gemini 5h 97% / W 95% · Argon 50% · Claude/GPT 80%');
+		const tooltip = (item.tooltip as any).value;
+		expect(tooltip).toContain('**5-hour limit**  \nRemaining: **97%**');
+		expect(tooltip).toContain('**Weekly limit**  \nRemaining: **95%**');
+		const formattedReset = (value: string) => new Date(value).toLocaleString(undefined,
+			{ day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+		expect(tooltip).toContain(`Reset: ${formattedReset(fiveHourReset)}`);
+		expect(tooltip).toContain(`Reset: ${formattedReset(weeklyReset)}`);
+		expect(tooltip).toContain('**Gemini 4 Argon**  \nRemaining: **50%**');
+		expect(item.accessibilityInformation?.label).toContain('Gemini five-hour: 97%. Gemini weekly: 95%.');
+	});
+
+	it('keeps missing windows unknown rather than copying discovery quota or assuming 100%', () => {
+		bar.update({ models: [], quota: { gemini: { remainingFraction: 1, modelCount: 3 } }, isFallback: false },
+			'test@example.com', { geminiQuota: { fiveHour: { remainingFraction: 0 } } });
+		expect(item.text).toBe('$(rocket) Gemini 5h 0% / W ?');
+		expect((item.tooltip as any).value).toContain('**Weekly limit**  \nRemaining: **Not reported**');
+		expect(item.accessibilityInformation?.label).toContain('Gemini weekly: not reported');
+		bar.setGeminiQuota('test@example.com', { weekly: { remainingFraction: .5 } });
+		expect(item.text).toBe('$(rocket) Gemini 5h ? / W 50%');
+	});
+
+	it('falls back to explicitly unclassified discovery quota when the summary is unavailable', () => {
+		bar.update({ models: [], quota: { gemini: { remainingFraction: .8, modelCount: 3 } }, isFallback: false }, 'test@example.com');
+		bar.setGeminiQuota('test@example.com', {});
+		expect(item.text).toBe('$(rocket) Gemini 80%');
+		expect((item.tooltip as any).value).toContain('Separate 5-hour and weekly limits not reported');
+		expect((item.tooltip as any).value).not.toContain('**Weekly limit**');
+	});
+
+	it('clears window metadata across account switches, loading and sign-out and ignores late results', () => {
+		const catalog = { models: [], quota: {}, isFallback: false };
+		bar.update(catalog, 'first@example.com');
+		bar.setGeminiQuota('first@example.com', { weekly: { remainingFraction: .25 }, updatedAt: Date.now() });
+		expect(item.text).toContain('W 25%');
+		expect((item.tooltip as any).value).toContain('Limits updated:');
+		bar.update(catalog, 'second@example.com');
+		bar.setGeminiQuota('first@example.com', { weekly: { remainingFraction: .25 } });
+		expect(item.text).not.toContain('25%');
+		bar.setLoading();
+		bar.setGeminiQuota('second@example.com', { weekly: { remainingFraction: .25 } });
+		expect(item.text).toBe('$(sync~spin) Antigravity');
+		bar.setSignedOut();
+		bar.setGeminiQuota('second@example.com', { weekly: { remainingFraction: .25 } });
+		expect(item.text).toContain('signed out');
+	});
+
 	it('shows credits as a separate balance, including zero, without changing Gemini quota', () => {
 		bar.update({ models: [], quota: { gemini: { remainingFraction: .98, modelCount: 2 } }, isFallback: false },
 			'test@example.com', { plan: { label: 'Pro', aiCredits: '1250' } });

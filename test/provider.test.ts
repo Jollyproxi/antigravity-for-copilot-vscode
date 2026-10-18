@@ -4,6 +4,62 @@ import { AntigravityProvider } from '../src/provider';
 import { log } from '../src/log';
 import { config } from '../src/config';
 import { AccountPlan } from '../src/api/accountPlan';
+import { GeminiQuota } from '../src/api/geminiQuota';
+
+describe('background Gemini quota windows', () => {
+	afterEach(() => vi.restoreAllMocks());
+	function harness() {
+		let finish!: (quota: GeminiQuota) => void;
+		const pending = new Promise<GeminiQuota>(resolve => { finish = resolve; });
+		const account = { email: 'first@example.invalid', refreshToken: 'synthetic' };
+		const store = { active: vi.fn().mockResolvedValue(account), onDidChange: () => ({ dispose() {} }) };
+		const summaries = { peek: vi.fn(), get: vi.fn().mockReturnValue(pending), invalidate: vi.fn() };
+		const status = { update: vi.fn(), setGeminiQuota: vi.fn(), setLoading: vi.fn(), setSignedOut: vi.fn() };
+		const client = { postJson: vi.fn().mockResolvedValue({ models: { 'gemini-3.8-flash-high': {} } }) };
+		const context = { subscriptions: [] as vscode.Disposable[] };
+		const provider = new AntigravityProvider(context as any, store as any, {} as any, client as any,
+			{ resolve: async () => 'synthetic-project' } as any, status as any, undefined, undefined, summaries as any);
+		return { provider, store, account, summaries, status, finish, context,
+			discover: () => provider.provideLanguageModelChatInformation({ silent: true }, {} as any) };
+	}
+
+	it('returns models without waiting for quota and then updates only the captured account', async () => {
+		const h = harness();
+		expect(await h.discover()).toHaveLength(1);
+		expect(h.summaries.get).toHaveBeenCalledWith(h.account);
+		expect(h.status.setGeminiQuota).not.toHaveBeenCalled();
+		h.finish({ fiveHour: { remainingFraction: .9 }, weekly: { remainingFraction: .5 } });
+		await Promise.resolve();
+		expect(h.status.setGeminiQuota).toHaveBeenCalledExactlyOnceWith(h.account.email,
+			{ fiveHour: { remainingFraction: .9 }, weekly: { remainingFraction: .5 } });
+	});
+
+	it('passes cached windows to the initial status update', async () => {
+		const h = harness();
+		const cached = { weekly: { remainingFraction: .5 } };
+		h.summaries.peek.mockReturnValue(cached);
+		await h.discover();
+		expect(h.status.update).toHaveBeenCalledWith(expect.anything(), h.account.email,
+			expect.objectContaining({ geminiQuota: cached }));
+	});
+
+	it.each(['refresh', 'switch', 'signout', 'dispose'])('ignores late quota after %s', async action => {
+		const h = harness();
+		await h.discover();
+		if (action === 'dispose') {
+			for (const subscription of h.context.subscriptions) subscription.dispose();
+		} else {
+			h.provider.refresh();
+			expect(h.summaries.invalidate).toHaveBeenCalledOnce();
+			if (action === 'switch') h.store.active.mockResolvedValue({ ...h.account, email: 'second@example.invalid' });
+			if (action === 'signout') h.store.active.mockResolvedValue(undefined);
+			if (action !== 'refresh') await h.discover();
+		}
+		h.finish({ weekly: { remainingFraction: .5 } });
+		await Promise.resolve();
+		expect(h.status.setGeminiQuota.mock.calls.some(([email]) => email === h.account.email)).toBe(false);
+	});
+});
 
 describe('account plan discovery', () => {
 	afterEach(() => vi.restoreAllMocks());

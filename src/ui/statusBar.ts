@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { Catalog, QuotaBucket } from '../api/models';
+import { Catalog } from '../api/models';
 import { AccountPlan } from '../api/accountPlan';
+import { GeminiQuota, QuotaWindow } from '../api/geminiQuota';
 import { config } from '../config';
 
 export interface QuotaStatusDetails {
@@ -8,6 +9,7 @@ export interface QuotaStatusDetails {
 	plan?: AccountPlan;
 	modelCount?: number;
 	updatedAt?: number;
+	geminiQuota?: GeminiQuota;
 }
 
 /** Compact summary in the bar; account, plan and separate quota blocks in the tooltip. */
@@ -50,9 +52,19 @@ export class QuotaStatusBar {
 		this.updateDisplay();
 	}
 
+	setGeminiQuota(email: string, quota: GeminiQuota): void {
+		if (!this.snapshot || this.snapshot.email !== email) return;
+		this.snapshot.details.geminiQuota = quota;
+		this.updateDisplay();
+	}
+
 	private updateDisplay(): void {
 		const { catalog, email, details } = this.snapshot!;
-		const gemini = format(catalog.quota.gemini);
+		const windows = details.geminiQuota;
+		const hasWindows = !!(windows?.fiveHour || windows?.weekly);
+		const gemini = hasWindows
+			? `5h ${format(windows?.fiveHour) ?? '?'} / W ${format(windows?.weekly) ?? '?'}`
+			: format(catalog.quota.gemini);
 		const argon = format(catalog.quota.argon);
 		const claude = format(catalog.quota.claude);
 		const plan = details.plan?.label;
@@ -71,21 +83,26 @@ export class QuotaStatusBar {
 			`Account: ${escapeMarkdown(email)}  \nPlan: **${plan ? escapeMarkdown(plan) : details.plan === undefined ? 'Loading…' : 'Not reported'}**`,
 		];
 		if (catalog.isFallback) {
-			blocks.push('**Model discovery failed.** Showing fallback models; quota is unavailable. Refresh or open Antigravity logs.');
+			blocks.push('**Model discovery failed.** Showing fallback models; per-model quota is unavailable. Refresh or open Antigravity logs.');
 		}
 		blocks.push(
-			quotaBlock('Gemini', catalog.quota.gemini),
+			hasWindows ? [
+				'**Gemini**',
+				quotaBlock('5-hour limit', windows?.fiveHour),
+				quotaBlock('Weekly limit', windows?.weekly),
+				...(windows?.updatedAt === undefined ? [] : [`Limits updated: ${new Date(windows.updatedAt).toLocaleTimeString()} · local time`]),
+			].join('  \n') : `${quotaBlock('Gemini', catalog.quota.gemini)}  \n_Separate 5-hour and weekly limits not reported; showing model-discovery quota._`,
 			...(catalog.quota.argon ? [quotaBlock('Gemini 4 Argon', catalog.quota.argon)] : []),
 			quotaBlock('Claude / GPT-OSS', catalog.quota.claude),
 			`**AI credits**  \nBalance: **${credits ?? (details.plan === undefined ? 'Loading…' : 'Not reported')}**  \nGoogle One account balance, separate from model quota.`,
 			'---',
 			`Models in picker: **${details.modelCount ?? catalog.models.length}**${catalog.isFallback ? ' (fallback)' : ''}  \nQuota updated: ${new Date(details.updatedAt!).toLocaleTimeString()} · local time`,
-			'_Plan and credits cached up to 5 minutes. Click to manage accounts and refresh._',
+			'_Gemini limits cached up to 1 minute; plan and credits up to 5 minutes. Click to manage accounts and refresh._',
 		);
 		// Blank paragraphs and explicit hard breaks keep quota groups from running together.
 		this.item.tooltip = new vscode.MarkdownString(blocks.join('\n\n'));
 		this.item.accessibilityInformation = {
-			label: `Antigravity. Plan: ${plan ?? (details.plan === undefined ? 'loading' : 'not reported')}. Gemini: ${gemini ?? 'not reported'}.${catalog.quota.argon ? ` Argon: ${argon ?? 'not reported'}.` : ''} Claude and GPT-OSS: ${claude ?? 'not reported'}. AI credits: ${credits ?? (details.plan === undefined ? 'loading' : 'not reported')}.`,
+			label: `Antigravity. Plan: ${plan ?? (details.plan === undefined ? 'loading' : 'not reported')}. ${hasWindows ? `Gemini five-hour: ${format(windows?.fiveHour) ?? 'not reported'}. Gemini weekly: ${format(windows?.weekly) ?? 'not reported'}.` : `Gemini: ${gemini ?? 'not reported'}.`}${catalog.quota.argon ? ` Argon: ${argon ?? 'not reported'}.` : ''} Claude and GPT-OSS: ${claude ?? 'not reported'}. AI credits: ${credits ?? (details.plan === undefined ? 'loading' : 'not reported')}.`,
 		};
 		this.render();
 	}
@@ -96,11 +113,11 @@ export class QuotaStatusBar {
 	}
 }
 
-function format(bucket: QuotaBucket | undefined): string | undefined {
+function format(bucket: QuotaWindow | undefined): string | undefined {
 	return bucket?.remainingFraction === undefined ? undefined : `${Math.round(bucket.remainingFraction * 100)}%`;
 }
 
-function quotaBlock(label: string, bucket: QuotaBucket | undefined): string {
+function quotaBlock(label: string, bucket: QuotaWindow | undefined): string {
 	const percent = format(bucket);
 	const lines = [`**${label}**`, `Remaining: **${percent ?? 'Not reported'}**`];
 	const reset = bucket?.resetTime ? Date.parse(bucket.resetTime) : NaN;

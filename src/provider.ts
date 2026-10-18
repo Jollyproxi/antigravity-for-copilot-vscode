@@ -32,6 +32,7 @@ import { awaitWithSignal } from './api/cancellation';
 import { RequestTiming } from './timing';
 import { ImageArtifactReference, ImageArtifactStore, missingImagePreviews } from './imageArtifacts';
 import { AccountPlanService } from './api/accountPlan';
+import { GeminiQuotaService } from './api/geminiQuota';
 
 /**
  * VS Code passes the model picker's `configurationSchema` selections on fields that
@@ -69,6 +70,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		private readonly statusBar: QuotaStatusBar,
 		private readonly imageArtifacts?: ImageArtifactStore,
 		private readonly plans?: AccountPlanService,
+		private readonly geminiQuota?: GeminiQuotaService,
 	) {
 		context.subscriptions.push(this._onDidChange);
 		context.subscriptions.push(this.store.onDidChange(() => this.refresh()));
@@ -80,6 +82,7 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 		this.refreshRevision++;
 		this.catalog = undefined;
 		this.plans?.invalidate();
+		this.geminiQuota?.invalidate();
 		this.statusBar.setLoading?.();
 		this._onDidChange.fire();
 	}
@@ -152,11 +155,18 @@ export class AntigravityProvider implements vscode.LanguageModelChatProvider {
 			this.statusBar.update(catalog, account.email, {
 				plan: this.plans?.peek(account.email), modelCount: offered.length,
 				updatedAt: this.catalog?.at ?? Date.now(),
+				geminiQuota: this.geminiQuota?.peek(account.email),
 			});
 			if (this.plans) {
 				const email = account.email;
 				void this.plans.get(account).then(plan => {
 					if (revision === this.refreshRevision) this.statusBar.setPlan(email, plan);
+				});
+			}
+			if (this.geminiQuota) {
+				const email = account.email;
+				void this.geminiQuota.get(account).then(quota => {
+					if (revision === this.refreshRevision) this.statusBar.setGeminiQuota(email, quota);
 				});
 			}
 			return offered;

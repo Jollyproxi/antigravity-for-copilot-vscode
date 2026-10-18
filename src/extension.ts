@@ -12,6 +12,7 @@ import { registerAntigravityImageGenerationTool } from './imageGeneration';
 import { registerAntigravityWebSearchTool } from './webSearch';
 import { ImageArtifactStore } from './imageArtifacts';
 import { AccountPlanService } from './api/accountPlan';
+import { GeminiQuotaService } from './api/geminiQuota';
 
 export function activate(context: vscode.ExtensionContext): void {
 	initLogging(context);
@@ -24,9 +25,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	const statusBar = new QuotaStatusBar(context);
 	const imageArtifacts = new ImageArtifactStore(context.globalStorageUri.fsPath);
 	const plans = new AccountPlanService(client);
-	context.subscriptions.push(plans);
+	const geminiQuota = new GeminiQuotaService(client);
+	context.subscriptions.push(plans, geminiQuota);
 
-	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar, imageArtifacts, plans);
+	const provider = new AntigravityProvider(context, store, tokens, client, projects, statusBar, imageArtifacts, plans, geminiQuota);
 	const deps: ManageDeps = {
 		store,
 		tokens,
