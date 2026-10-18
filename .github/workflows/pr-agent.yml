@@ -13,7 +13,8 @@ permissions: {}
 jobs:
   review:
     # Opt in only after configuring the provider, model, and API key.
-    # External contributors cannot trigger paid reviews or arbitrary bot commands.
+    # All human contributors can trigger automatic reviews, including fork PRs.
+    # Manual /review commands remain restricted to trusted commenters.
     if: >-
       vars.PR_AGENT_ENABLED == 'true' &&
       vars.PR_AGENT_PROVIDER != '' &&
@@ -22,8 +23,7 @@ jobs:
       (
         (
           github.event_name == 'pull_request_target' &&
-          !github.event.pull_request.draft &&
-          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+          !github.event.pull_request.draft
         ) ||
         (
           github.event_name == 'issue_comment' &&

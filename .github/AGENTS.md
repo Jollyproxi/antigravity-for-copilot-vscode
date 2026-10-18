@@ -8,7 +8,8 @@
   API-key secret. Never reuse local OAuth credentials or commit API keys.
 - Pin the executing Docker image by digest, not a rolling wrapper or image tag.
 - Never check out or execute contributor code in this privileged workflow.
-- Preserve the trusted-author automatic-review gate and exact, trusted-commenter
+- Automatic reviews accept all human contributors, including forks and first-time
+  contributors; preserve the draft/bot exclusions and exact, trusted-commenter
   `/review` gate. Never interpolate PR text into shell commands or settings.
 - Keep contents read-only; do not enable approval, merge, code pushes, or arbitrary
   comment-command/configuration execution. Disable PR-supplied settings/context.

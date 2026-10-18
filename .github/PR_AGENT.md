@@ -69,10 +69,9 @@ missing API key or mismatched model fails with a configuration message.
 ## Behavior and trust boundary
 
 - Automatic reviews run on non-draft PRs targeting `main`, on open, reopen,
-  ready-for-review, and new commits, only when the PR author's GitHub association
-  is `OWNER`, `MEMBER`, or `COLLABORATOR`.
-- Fork PRs from other contributors are not reviewed automatically. An owner,
-  member, or collaborator can request a review by posting exactly `/review`.
+  ready-for-review, and new commits, for all human contributors, including forks
+  and first-time contributors. No `/review` comment is needed.
+- An owner, member, or collaborator can also request a review by posting exactly `/review`.
   Other commands and command-line/configuration arguments are not accepted.
 - Bot events, ordinary issues, and comments on closed PRs are ignored.
 - `pull_request_target` runs trusted base-branch workflow code. There is **no
@@ -92,7 +91,9 @@ missing API key or mismatched model fails with a configuration message.
 - Only the selected provider receives a configured credential. Model fallback is
   disabled, input budgeting is capped at 32,000 tokens, and each job has a
   15-minute timeout. Those limits are **not a monetary spending cap**; configure
-  provider-side budgets/alerts as well. New commits can each incur another review.
+  provider-side budgets/alerts as well. Anyone can consume the configured Gemini
+  quota by opening PRs, and new commits can each incur another review. Keep paid
+  billing disabled on the API project if you only want eligible free-tier usage.
 
 ## Pinned release and updates
 
@@ -116,7 +117,7 @@ gh attestation verify "oci://index.docker.io/pragent/pr-agent@sha256:80edef71baa
 ```
 
 Validate YAML and GitHub expressions with `actionlint .github/workflows/pr-agent.yml`
-and keep the no-checkout, association, exact-command, and permission safeguards.
+and keep the no-checkout, trusted-commenter, exact-command, and permission safeguards.
 
 References: [official GitHub setup](https://docs.pr-agent.ai/installation/github/),
 [model configuration](https://docs.pr-agent.ai/usage-guide/changing_a_model/), and

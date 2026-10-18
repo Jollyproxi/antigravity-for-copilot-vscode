@@ -298,8 +298,9 @@ The gateway speaks a Gemini dialect for **every** model family, Claude included;
 An optional PR-Agent GitHub Actions workflow is available for maintainers. It is
 disabled until an AI provider, model, and API-key secret are configured. See the
 [PR-Agent setup guide](.github/PR_AGENT.md) for activation, supported providers,
-fork-review permissions, data sharing, and API costs. It does not use your local
-Antigravity sign-in.
+data sharing, and API costs. When enabled, it automatically reviews non-draft PRs
+to `main` from all human contributors, including forks and first-time contributors.
+It does not use your local Antigravity sign-in.
 
 ## Contributors
 
