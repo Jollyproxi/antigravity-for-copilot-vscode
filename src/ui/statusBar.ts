@@ -75,7 +75,7 @@ export class QuotaStatusBar {
 		}
 		blocks.push(
 			quotaBlock('Gemini', catalog.quota.gemini),
-			quotaBlock('Gemini 4 Argon', catalog.quota.argon),
+			...(catalog.quota.argon ? [quotaBlock('Gemini 4 Argon', catalog.quota.argon)] : []),
 			quotaBlock('Claude / GPT-OSS', catalog.quota.claude),
 			`**AI credits**  \nBalance: **${credits ?? (details.plan === undefined ? 'Loading…' : 'Not reported')}**  \nGoogle One account balance, separate from model quota.`,
 			'---',
@@ -85,7 +85,7 @@ export class QuotaStatusBar {
 		// Blank paragraphs and explicit hard breaks keep quota groups from running together.
 		this.item.tooltip = new vscode.MarkdownString(blocks.join('\n\n'));
 		this.item.accessibilityInformation = {
-			label: `Antigravity. Plan: ${plan ?? (details.plan === undefined ? 'loading' : 'not reported')}. Gemini: ${gemini ?? 'not reported'}. Argon: ${argon ?? 'not reported'}. Claude and GPT-OSS: ${claude ?? 'not reported'}. AI credits: ${credits ?? (details.plan === undefined ? 'loading' : 'not reported')}.`,
+			label: `Antigravity. Plan: ${plan ?? (details.plan === undefined ? 'loading' : 'not reported')}. Gemini: ${gemini ?? 'not reported'}.${catalog.quota.argon ? ` Argon: ${argon ?? 'not reported'}.` : ''} Claude and GPT-OSS: ${claude ?? 'not reported'}. AI credits: ${credits ?? (details.plan === undefined ? 'loading' : 'not reported')}.`,
 		};
 		this.render();
 	}

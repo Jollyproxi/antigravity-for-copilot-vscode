@@ -26,7 +26,7 @@ Requests run on your Antigravity account rather than Copilot premium requests.
 - **Context usage reporting** — completed gateway token usage feeds VS Code's Context Window
   widget, including its prompt breakdown when the installed VS Code build supports it.
 - **Multi-turn reasoning continuity** — thought signatures are replayed so tool-using conversations survive past the first turn.
-- **Quota groups** in the status bar: three distinct allocations for standard Gemini (Flash and Pro), Gemini 4 Argon, and Claude/GPT models, matching native Antigravity usage pools. The percentage is the lowest reported remaining fraction within each group.
+- **Quota groups** in the status bar: standard Gemini (Flash and Pro), discovered Gemini 4 Argon, and Claude/GPT models. Argon is displayed separately only when discovery reports it. The percentage is the lowest reported remaining fraction within each group; the bridge does not infer weekly limits or backend pool identifiers.
 - **Account plan and clearer quota details**: the compact bar shows the reported plan alongside Gemini, Argon, and Claude/GPT percentages. Hover for the account, separate quota/reset sections (local time), the number of models actually offered in the picker, and the quota update time. Plan metadata comes from the extension's authenticated account (`loadCodeAssist`, paid tier first), loads in the background, and is cached for five minutes. Missing metadata shows **Not reported**, never an inferred Free/Pro plan; unsuccessful lookups are cached for 30 seconds. Refreshing or changing accounts clears the plan cache.
 - **AI credit balance**: when account metadata reports Google One AI credits, the bar also shows `Credits …` and the tooltip includes a separate balance section. Credits share the plan metadata's five-minute cache; use **Antigravity: Refresh Models and Quota** to request fresh data. Missing/invalid balances show **Not reported**, while an explicit zero remains `0`. This is an account credit balance, separate from Gemini, Argon, and Claude/GPT baseline percentages, and displaying it does not enable spending. See [Google's AI credits guide](https://antigravity.google/docs/cli/credits).
 - **Thinking Effort control** in the picker, next to the model, offering only the tiers the backend can serve.
@@ -66,7 +66,7 @@ This is a dated account snapshot, not a fixed availability guarantee. Claude is 
 as **4.6/5.5** because availability can change; the actual picker always uses discovered
 names and IDs. The extension does not synthesize Claude 5.5 model IDs.
 
-**Gemini 4 Argon:** Google officially provides Gemini 4 Argon for Google AI Pro (paid subscriptions) and Google AI Ultra accounts. The bridge adds no placeholder or guessed ID. When a successful discovery returns an Argon chat model, it appears after **Antigravity: Refresh Models and Quota**, folded under its High, Medium, and Low effort tiers with a dedicated quota indicator. Generation depends on account allocation on Google's backend.
+**Gemini 4 Argon:** [Google lists Argon](https://antigravity.google/docs/models/) for non-trial Google AI Pro, Ultra, and eligible Enterprise accounts. Availability remains account-dependent. The bridge adds no placeholder or guessed ID. When successful discovery returns Argon models, they appear after **Antigravity: Refresh Models and Quota**, combined using only the returned effort tiers, with a separate quota display. The bridge uses the [documented 65,536-token synchronous output limit](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon); generation through the undocumented gateway still needs live verification on an eligible account. See the [quota research notes](docs/research/antigravity-quota-pools.md) for the evidence and limitations.
 
 The default `latest` filters non-chat/internal aliases, duplicate display names, Flash
 Lite, and older Gemini generations. If discovery returns several generations, the
@@ -292,6 +292,11 @@ The gateway speaks a Gemini dialect for **every** model family, Claude included;
   takes a numeric budget, capped strictly below `maxOutputTokens`.
 - **`api/agent-metadata.ts`** — requests carry the agent envelope: `requestType`, a five-segment
   `requestId`, telemetry labels and an FNV-1a session id, in the field order the real client uses.
+
+## Contributors
+
+- [@SamiMitwalli](https://github.com/SamiMitwalli) — Claude tool-call compatibility ([PR #2](https://github.com/lutfi238/antigravity-for-copilot-vscode/pull/2)).
+- [@Jollyproxi](https://github.com/Jollyproxi) — Gemini 4 Argon quota display, model handling, and CLI fingerprint update ([PR #4](https://github.com/lutfi238/antigravity-for-copilot-vscode/pull/4)).
 
 ## License
 

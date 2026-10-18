@@ -13,7 +13,7 @@
 
 - Use native VS Code commands, QuickPick/message APIs, settings navigation, and status bar items.
 - Keep account switching and removal synchronized with `AccountStore` notifications and provider refresh.
-- Display two quota groups: Gemini (all models, including Pro and Flash) and Claude/GPT.
+- Display standard Gemini (Pro and Flash), discovered Gemini Argon, and Claude/GPT quota groups. Omit Argon from the tooltip and accessibility label when the catalogue does not report it; clear it on account switches and preserve exhausted zero versus unknown quota.
 - Display account AI credit balance separately from baseline quota, preserving explicit zero and distinguishing missing metadata. Credit display never changes spending settings.
 - Keep the bar compact; separate account/plan and each quota/reset group in the tooltip. Show only backend-reported plans, distinguish loading from missing metadata, count models actually offered in the picker, and ignore late plan updates for another account.
 - Respect `antigravity.showStatusBar` and dispose all UI resources through the extension context.

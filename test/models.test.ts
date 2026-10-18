@@ -147,6 +147,28 @@ describe('fetchCatalog', () => {
 		expect(catalog.quota.gemini?.resetTime).toBe('2026-09-01T00:00:00Z');
 	});
 
+	it('keeps exhausted Argon quota and its earliest reset separate from Flash', async () => {
+		const catalog = await fetchCatalog(clientReturning({ models: {
+			'gemini-3.8-flash-high': { quotaInfo: { remainingFraction: 1, resetTime: '2026-10-18T08:00:00Z' } },
+			'gemini-4-argon-high': { quotaInfo: { remainingFraction: 0, resetTime: '2026-10-25T00:00:00Z' } },
+			'gemini-4-argon-medium': { quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-24T00:00:00Z' } },
+			'gemini-4-argon-low': {},
+		} }), 'op', 'proj');
+		expect(catalog.quota.argon).toEqual({ remainingFraction: 0, resetTime: '2026-10-24T00:00:00Z', modelCount: 3 });
+		expect(catalog.quota.gemini?.remainingFraction).toBe(1);
+		expect(catalog.quota.gemini?.resetTime).toBe('2026-10-18T08:00:00Z');
+	});
+
+	it('recognizes Gemini Argon display aliases without classifying unrelated Argon names', async () => {
+		const catalog = await fetchCatalog(clientReturning({ models: {
+			Chat_987: { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: 0.7 } },
+			'claude-sonnet-4-6': { displayName: 'Claude Sonnet (Argon integration)', quotaInfo: { remainingFraction: 0.2 } },
+			'argon-helper': { displayName: 'Argon helper', quotaInfo: { remainingFraction: 0 } },
+		} }), 'op', 'proj');
+		expect(catalog.quota.argon).toMatchObject({ remainingFraction: 0.7, modelCount: 1 });
+		expect(catalog.quota.claude).toMatchObject({ remainingFraction: 0.2, modelCount: 1 });
+	});
+
 	it('retains reported Gemini quota when another Gemini model omits it or uses an internal alias', async () => {
 		const catalog = await fetchCatalog(
 			clientReturning({ models: {
@@ -448,6 +470,13 @@ describe('resolveTier', () => {
 });
 
 describe('spec — output limits', () => {
+	it.each(['high', 'medium', 'low'])('assigns the documented Argon limits and %s reasoning tier', tier => {
+		expect(spec(`gemini-4-argon-${tier}`, 'Gemini 4 Argon')).toMatchObject({
+			family: 'gemini', contextWindow: 1_048_576, maxOutputTokens: 65_536,
+			thinkingStyle: 'model-id-tier', thinkingTier: tier,
+		});
+	});
+
 	it('caps Gemini Pro one token below Flash, as the gateway requires', () => {
 		// 65536 to Pro comes back as a bare "Request contains an invalid argument."
 		// with no field named — the hardest kind of off-by-one to trace.
@@ -516,5 +545,19 @@ describe('curateModels — newest discovered generation', () => {
 
 	it('keeps the newest Pro independently of Flash', () => {
 		expect(lines(base)).toContain('Gemini 3.1 Pro');
+	});
+
+	it('curates Argon generations independently and collapses only discovered effort tiers', () => {
+		// Synthetic future generation verifies curation, not current availability.
+		const argon = ['4', '4.1'].flatMap(version => ['high', 'low'].map(tier =>
+			spec(`gemini-${version}-argon-${tier}`, `Gemini ${version} Argon (${tier})`)));
+		const raw = [...base, ...flash('3.8'), ...argon];
+		const curated = curateModels(raw, false);
+		expect(curated.some(model => model.id.startsWith('gemini-4-argon-'))).toBe(false);
+		expect(curated.some(model => model.id.startsWith('gemini-3.8-flash-'))).toBe(true);
+		const model = collapseTiers(curated).find(model => model.name === 'Gemini 4.1 Argon')!;
+		expect(model.tierVariants).toEqual({ high: 'gemini-4.1-argon-high', low: 'gemini-4.1-argon-low' });
+		expect(resolveTierSpec(model, 'medium')).toMatchObject({ id: 'gemini-4.1-argon-high', thinkingTier: 'high' });
+		expect(curateModels(raw, true).some(model => model.id === 'gemini-4-argon-high')).toBe(true);
 	});
 });

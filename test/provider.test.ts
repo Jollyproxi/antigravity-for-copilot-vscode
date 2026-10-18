@@ -433,6 +433,27 @@ describe('provider effort, cancellation and latency diagnostics', () => {
 		expect((await h.discover()).some(m => m.name === 'Gemini 4 Argon')).toBe(false);
 	});
 
+	it.each(['low', 'medium', 'high'])('routes discovered Argon %s effort through the Gemini wire with matching limits', async effort => {
+		const h = harness();
+		h.client.postJson.mockResolvedValue({ models: Object.fromEntries(['high', 'medium', 'low'].map(tier => [
+			`gemini-4-argon-${tier}`, { displayName: `Gemini 4 Argon (${tier})` },
+		])) });
+		const [info] = await h.discover();
+		expect(info.name).toBe('Gemini 4 Argon');
+		expect(info.configurationSchema?.properties.reasoningEffort).toMatchObject({
+			enum: ['low', 'medium', 'high'], default: 'medium',
+		});
+		expect(info.maxInputTokens).toBe(1_048_576 - 65_536);
+		await h.send(info, effort);
+		const body = h.client.post.mock.calls[0][0].body;
+		expect(body.model).toBe(`gemini-4-argon-${effort}`);
+		expect(body.request.generationConfig).toMatchObject({
+			maxOutputTokens: 65_536, thinkingConfig: { includeThoughts: true, thinkingLevel: effort },
+		});
+		expect(body.request.contents[0].role).toBe('user');
+		expect(body.request.messages).toBeUndefined();
+	});
+
 	it('filters the observed old Flash IDs from discovery by default, with all as explicit opt-in', async () => {
 		const h = harness();
 		h.client.postJson.mockResolvedValue({ models: {

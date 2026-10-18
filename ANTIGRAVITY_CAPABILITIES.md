@@ -18,11 +18,20 @@ generations and Gemini 3.1 Pro from the original snapshot are no longer in this
 account's returned list. The bridge's fallback roster now matches these six IDs.
 
 User-facing descriptions use Claude **4.6/5.5** to acknowledge changing availability;
-this does not create or rename discovered IDs. Gemini 4 Argon is officially available
-for Google AI Pro (paid subscriptions) and Google AI Ultra accounts (`agy models`
-confirms `gemini-4-argon-high`, `gemini-4-argon-medium`, `gemini-4-argon-low`). The bridge
-creates no synthetic placeholder; when discovered, Argon is classified under its own
-dedicated quota pool and collapses into a single picker entry with its effort tiers.
+this does not create or rename discovered IDs.
+
+### Argon review — 2026-10-18
+
+[Google's model documentation](https://antigravity.google/docs/models/) lists Gemini
+4 Argon for non-trial Google AI Pro, Ultra, and eligible Enterprise accounts.
+[@Jollyproxi's PR #4](https://github.com/lutfi238/antigravity-for-copilot-vscode/pull/4)
+reports its high/medium/low IDs and a separate quota allocation. This machine's
+installed CLI 1.3.6 still returns the six-model roster above and only two usage groups;
+it cannot independently verify Argon access or its quota pool. The bridge creates no
+synthetic placeholder, combines only discovered effort tiers, and displays reported
+Argon quota separately. Its 65,536-token synchronous output limit follows the
+[public model specification](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon),
+not a completed gateway generation test. See the [quota research](docs/research/antigravity-quota-pools.md).
 
 The original audit also predates response-level reasoning observations: Gemini Flash
 can return thought text on some requests, not only token counts. Consult the README

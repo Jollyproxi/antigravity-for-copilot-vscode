@@ -2,10 +2,11 @@
 
 ## 0.15.16
 
-- Separate Antigravity usage tracking into three distinct quota allocations in the status bar and model catalog: standard Gemini, Gemini 4 Argon, and Claude/GPT-OSS.
-- Update line parser to recognize `argon` as an eligible Gemini generation line and collapse effort tiers into a single `Gemini 4 Argon` picker entry when discovered.
+- Display discovered Gemini 4 Argon quota separately from standard Gemini and Claude/GPT-OSS. Omit the Argon section on accounts that do not report it, preserve exhausted versus unknown balances, and clear it when switching accounts.
+- Recognize Argon as a separate Gemini product line for generation curation, retain its discovered effort tiers in the combined picker, and use its documented 65,536-token synchronous output limit.
 - Update CLI fingerprint User-Agent version to `1.4.0` to match the current Antigravity CLI release.
-- Avoid forcing synthetic Argon models when omitted by backend discovery to prevent 429 quota exhaustion errors.
+- Continue to use only discovered Argon models; no guessed IDs, unavailable placeholders, or new credit-spending behavior.
+- Thanks to [@Jollyproxi](https://github.com/Jollyproxi) for the Argon support in [PR #4](https://github.com/lutfi238/antigravity-for-copilot-vscode/pull/4).
 
 ## 0.15.15
 
